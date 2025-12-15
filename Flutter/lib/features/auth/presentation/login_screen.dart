@@ -167,7 +167,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: state.isLoading ? null : handlePasswordReset,
+                              onPressed: state.isLoading ? null : () => context.go(Routes.restore),
                               child: Text(l10n.forgotPassword),
                             ),
                           ),
