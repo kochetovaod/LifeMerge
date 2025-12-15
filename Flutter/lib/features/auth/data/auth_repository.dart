@@ -1,53 +1,119 @@
-import 'dart:async';
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'auth_api_service.dart';
-import 'session_storage.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/network/api_client.dart';
+import '../../../domain/user.dart';
 
 class AuthRepository {
-  AuthRepository(this._api, this._storage);
+  final ApiClient _apiClient;
+  final SharedPreferences _prefs;
 
-  final AuthApiService _api;
-  final SessionStorage _storage;
+  AuthRepository(this._apiClient, this._prefs);
 
-  Future<AuthSession> signUp({required String email, required String password}) async {
-    final token = await _api.signUp(email: email, password: password);
-    final session = AuthSession(email: email, token: token);
-    await _storage.saveSession(session);
-    return session;
+  Future<String?> getAccessToken() async {
+    return _prefs.getString('access_token');
   }
 
-  Future<AuthSession> login({required String email, required String password}) async {
-    final token = await _api.login(email: email, password: password);
-    final session = AuthSession(email: email, token: token);
-    await _storage.saveSession(session);
-    return session;
+  Future<String?> getRefreshToken() async {
+    return _prefs.getString('refresh_token');
   }
 
-  Future<void> requestPasswordReset(String email) => _api.requestPasswordReset(email);
-
-  Future<void> logout(String token) async {
-    await _api.logout(token);
-    await _storage.clear();
+  Future<String> getDeviceId() async {
+    return _prefs.getString('device_id') ?? '';
   }
 
-  Future<AuthSession?> restore() => _storage.readSession();
+  Future<User> signup({
+    required String email,
+    required String password,
+    required String fullName,
+    String timezone = 'UTC',
+  }) async {
+    final response = await _apiClient.signup({
+      'email': email,
+      'password': password,
+      'full_name': fullName,
+      'timezone': timezone,
+    });
+
+    await _saveTokens(response);
+    return User.fromJson(response['user']);
+  }
+
+  Future<User> login({
+    required String email,
+    required String password,
+  }) async {
+    final deviceId = await getDeviceId();
+    final response = await _apiClient.login({
+      'email': email,
+      'password': password,
+      'device_id': deviceId,
+    });
+
+    await _saveTokens(response);
+    return User.fromJson(response['user']);
+  }
+
+  Future<bool> refreshAccessToken() async {
+    try {
+      final refreshToken = await getRefreshToken();
+      final deviceId = await getDeviceId();
+      
+      if (refreshToken == null) return false;
+
+      final response = await _apiClient.refreshToken({
+        'refresh_token': refreshToken,
+        'device_id': deviceId,
+      });
+
+      await _saveTokens(response);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> logout() async {
+    final deviceId = await getDeviceId();
+    final refreshToken = await getRefreshToken();
+    
+    if (refreshToken != null) {
+      await _apiClient.logout({
+        'device_id': deviceId,
+      });
+    }
+    
+    await _clearTokens();
+  }
+
+  Future<bool> isAuthenticated() async {
+    final token = await getAccessToken();
+    return token != null;
+  }
+
+  Future<User?> getCurrentUser() async {
+    final userJson = _prefs.getString('current_user');
+    if (userJson == null) return null;
+    
+    try {
+      return User.fromJson(json.decode(userJson));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Приватные методы
+  Future<void> _saveTokens(Map<String, dynamic> response) async {
+    await _prefs.setString('access_token', response['access_token']);
+    await _prefs.setString('refresh_token', response['refresh_token']);
+    
+    if (response['user'] != null) {
+      await _prefs.setString('current_user', json.encode(response['user']));
+    }
+  }
+
+  Future<void> _clearTokens() async {
+    await _prefs.remove('access_token');
+    await _prefs.remove('refresh_token');
+    await _prefs.remove('current_user');
+  }
 }
-
-class AuthSession {
-  const AuthSession({required this.email, required this.token});
-
-  final String email;
-  final String token;
-}
-
-final authApiServiceProvider = Provider<AuthApiService>((ref) {
-  return AuthApiService();
-});
-
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  final api = ref.read(authApiServiceProvider);
-  final storage = ref.read(sessionStorageProvider);
-  return AuthRepository(api, storage);
-});

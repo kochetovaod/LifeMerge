@@ -1,137 +1,67 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/analytics/analytics_service.dart';
-import '../data/auth_api_service.dart';
 import '../data/auth_repository.dart';
-import '../domain/auth_error_code.dart';
 import 'auth_state.dart';
 
 class AuthController extends StateNotifier<AuthState> {
-  AuthController(this._analytics, this._repository) : super(const AuthState());
+  AuthController(this._repo) : super(const AuthInitial());
 
-  final AnalyticsService _analytics;
-  final AuthRepository _repository;
+  final AuthRepository _repo;
+
+  Future<void> restoreSession() async {
+    final isAuthed = await _repo.isAuthenticated();
+    if (!isAuthed) {
+      state = const AuthUnauthenticated();
+      return;
+    }
+    final user = await _repo.getCurrentUser();
+    if (user == null) {
+      state = const AuthUnauthenticated();
+      return;
+    }
+    state = AuthAuthenticated(user: user);
+  }
 
   Future<bool> signIn({required String email, required String password}) async {
-    state = state.copyWith(isLoading: true, clearError: true);
+    state = const AuthLoading();
     try {
-      final session = await _repository.login(email: email, password: password);
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: null,
-        isAuthenticated: true,
-        email: session.email,
-        token: session.token,
-        errorCode: null,
-      );
+      final user = await _repo.login(email: email, password: password);
+      state = AuthAuthenticated(user: user);
       return true;
-    } on AuthApiException catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        isAuthenticated: false,
-        errorMessage: error.toString(),
-        errorCode: error.code,
-      );
-      return false;
-    } catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        isAuthenticated: false,
-        errorMessage: error.toString(),
-        errorCode: AuthErrorCode.unknown,
-      );
+    } catch (e) {
+      state = AuthError(e.toString());
       return false;
     }
   }
 
-  Future<bool> signUp({required String email, required String password}) async {
-    state = state.copyWith(isLoading: true, clearError: true);
+  Future<bool> signUp({
+    required String email,
+    required String password,
+    required String fullName,
+    String timezone = 'UTC',
+  }) async {
+    state = const AuthLoading();
     try {
-      final session = await _repository.signUp(email: email, password: password);
-      await _analytics.logEvent('User_SignUp', parameters: <String, dynamic>{'email': email});
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: null,
-        isAuthenticated: true,
-        email: session.email,
-        token: session.token,
-        errorCode: null,
+      final user = await _repo.signup(
+        email: email,
+        password: password,
+        fullName: fullName,
+        timezone: timezone,
       );
+      state = AuthAuthenticated(user: user);
       return true;
-    } on AuthApiException catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        isAuthenticated: false,
-        errorMessage: error.toString(),
-        errorCode: error.code,
-      );
-      return false;
-    } catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        isAuthenticated: false,
-        errorMessage: error.toString(),
-        errorCode: AuthErrorCode.unknown,
-      );
-      return false;
-    }
-  }
-
-  Future<bool> requestPasswordReset(String email) async {
-    state = state.copyWith(isLoading: true, clearError: true);
-    try {
-      await _repository.requestPasswordReset(email);
-      state = state.copyWith(isLoading: false, clearError: true);
-      return true;
-    } on AuthApiException catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: error.toString(),
-        errorCode: error.code,
-      );
-      return false;
-    } catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: error.toString(),
-        errorCode: AuthErrorCode.unknown,
-      );
+    } catch (e) {
+      state = AuthError(e.toString());
       return false;
     }
   }
 
   Future<void> signOut() async {
-    final token = state.token;
-    state = state.copyWith(isLoading: true, clearError: true);
-    if (token != null) {
-      await _repository.logout(token);
-    }
-    state = const AuthState();
-  }
-
-  Future<void> restoreSession() async {
-    final session = await _repository.restore();
-    if (session != null) {
-      state = state.copyWith(
-        isAuthenticated: true,
-        email: session.email,
-        token: session.token,
-        clearError: true,
-      );
-    }
-  }
-
-  void clearError() {
-    if (state.errorMessage != null) {
-      state = state.copyWith(clearError: true);
+    state = const AuthLoading();
+    try {
+      await _repo.logout();
+    } finally {
+      state = const AuthUnauthenticated();
     }
   }
 }
-
-final authControllerProvider = StateNotifierProvider<AuthController, AuthState>((ref) {
-  final analytics = ref.read(analyticsProvider);
-  final repository = ref.read(authRepositoryProvider);
-  return AuthController(analytics, repository);
-});

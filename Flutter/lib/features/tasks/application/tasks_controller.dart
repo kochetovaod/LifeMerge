@@ -1,247 +1,73 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/di/providers.dart';
+import '../data/tasks_cache.dart';
 import '../data/tasks_repository.dart';
 import '../domain/task.dart';
 import 'tasks_state.dart';
 
 class TasksController extends StateNotifier<TasksState> {
-  TasksController(this._repository) : super(const TasksState()) {
-    _loadTasks();
+  TasksController(this._repo, this._cache) : super(const TasksState()) {
+    // 1) покажем кэш сразу
+    final cached = _cache.read();
+    if (cached.isNotEmpty) {
+      state = state.copyWith(items: cached);
+    }
+    // 2) потом обновим с сервера
+    refresh();
   }
 
-  final TasksRepository _repository;
-  Timer? _retryTimer;
+  final TasksRepository _repo;
+  final TasksCache _cache;
 
-  Future<void> _loadTasks() async {
-    state = state.copyWith(isLoading: true, clearError: true);
-    await _flushQueue(force: true);
+  Future<void> refresh() async {
+    state = state.copyWith(isLoading: true, errorMessage: null);
     try {
-      final tasks = await _repository.fetchTasks();
-      state = state.copyWith(tasks: tasks, isLoading: false, clearError: true);
-    } catch (error) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: error.toString(),
-      );
+      final items = await _repo.fetchTasks();
+      state = state.copyWith(items: items, isLoading: false);
+      await _cache.write(items);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }
 
-  Future<void> refresh() => _loadTasks();
-
-  Future<void> syncPending() async {
-    await _flushQueue(force: true);
-  }
-
-  Future<void> addTask(TaskDraft draft) async {
-    final now = DateTime.now();
-    final pendingTask = Task(
-      id: _generateRequestId(prefix: 'local'),
-      title: draft.title,
-      description: draft.description,
-      dueAt: draft.dueAt,
-      priority: draft.priority,
-      estimatedMinutes: draft.estimatedMinutes,
-      energyLevel: draft.energyLevel,
-      status: draft.status,
-      createdAt: now,
-      updatedAt: now,
-    );
-
-    if (state.isOffline) {
-      _enqueueOperation(TaskOperationType.create, pendingTask);
-      _applyLocalChange(pendingTask);
-      return;
-    }
-
-    await _executeCreate(pendingTask);
-  }
-
-  Future<void> updateTask(Task task, TaskDraft draft) async {
-    final updatedTask = task.copyWith(
-      title: draft.title,
-      description: draft.description,
-      dueAt: draft.dueAt,
-      priority: draft.priority,
-      estimatedMinutes: draft.estimatedMinutes,
-      energyLevel: draft.energyLevel,
-      status: draft.status,
-      updatedAt: DateTime.now(),
-    );
-
-    if (state.isOffline) {
-      _enqueueOperation(TaskOperationType.update, updatedTask);
-      _replaceTask(task.id, updatedTask);
-      return;
-    }
-
-    await _executeUpdate(updatedTask);
-  }
-
-  Future<void> deleteTask(Task task) async {
-    final deletedTask = task.copyWith(deleted: true, updatedAt: DateTime.now());
-    if (state.isOffline) {
-      _enqueueOperation(TaskOperationType.delete, deletedTask);
-      _removeTask(task.id);
-      return;
-    }
-
-    await _executeDelete(deletedTask);
-  }
-
-  void toggleOfflineMode() {
-    final wasOffline = state.isOffline;
-    state = state.copyWith(isOffline: !state.isOffline);
-    if (wasOffline && !state.isOffline) {
-      unawaited(_flushQueue(force: true));
-    }
-  }
-
-  void clearError() {
-    if (state.errorMessage != null) {
-      state = state.copyWith(clearError: true);
-    }
-  }
-
-  void _applyLocalChange(Task task) {
-    state = state.copyWith(tasks: <Task>[...state.tasks, task]);
-  }
-
-  void _replaceTask(String originalId, Task updated) {
-    final tasks = state.tasks.map((task) {
-      if (task.id == originalId) {
-        return updated;
-      }
-      return task;
-    }).toList();
-    state = state.copyWith(tasks: tasks);
-  }
-
-  void _removeTask(String id) {
-    state = state.copyWith(tasks: state.tasks.where((task) => task.id != id).toList());
-  }
-
-  void _enqueueOperation(TaskOperationType type, Task task) {
-    final operation = PendingTaskOperation(
-      type: type,
-      task: task,
-      requestId: _generateRequestId(),
-      enqueuedAt: DateTime.now(),
-    );
-    state = state.copyWith(
-      pendingOperations: <PendingTaskOperation>[...state.pendingOperations, operation],
-    );
-    _scheduleRetry();
-  }
-
-  Future<void> _flushQueue({bool force = false}) async {
-    if (state.pendingOperations.isEmpty) {
-      _cancelRetry();
-      return;
-    }
-
-    if (state.isOffline && !force) {
-      _scheduleRetry();
-      return;
-    }
-
-    final List<PendingTaskOperation> remaining = <PendingTaskOperation>[];
-    var hadError = false;
-    for (final operation in state.pendingOperations) {
-      try {
-        switch (operation.type) {
-          case TaskOperationType.create:
-            final created = await _repository.createTask(operation.task);
-            _replaceTask(operation.task.id, created);
-            break;
-          case TaskOperationType.update:
-            final updated = await _repository.updateTask(operation.task);
-            _replaceTask(operation.task.id, updated);
-            break;
-          case TaskOperationType.delete:
-            await _repository.deleteTask(operation.task.id);
-            _removeTask(operation.task.id);
-            break;
-        }
-      } catch (error) {
-        hadError = true;
-        remaining.add(operation);
-      }
-    }
-
-    state = state.copyWith(
-      pendingOperations: remaining,
-      isOffline: hadError && remaining.isNotEmpty,
-    );
-
-    if (remaining.isEmpty) {
-      _cancelRetry();
-    } else {
-      _scheduleRetry();
-    }
-  }
-
-  Future<void> _executeCreate(Task pendingTask) async {
+  Future<void> create(TaskDraft draft) async {
+    state = state.copyWith(isLoading: true, errorMessage: null);
     try {
-      final created = await _repository.createTask(pendingTask);
-      _applyOrInsert(created);
-    } catch (error) {
-      _enqueueOperation(TaskOperationType.create, pendingTask);
-      state = state.copyWith(errorMessage: error.toString(), isOffline: true);
+      final created = await _repo.createTask(draft);
+      final updated = <Task>[created, ...state.items];
+      state = state.copyWith(items: updated, isLoading: false);
+      await _cache.write(updated);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }
 
-  Future<void> _executeUpdate(Task updatedTask) async {
+  Future<void> update(String id, TaskDraft patch) async {
+    state = state.copyWith(isLoading: true, errorMessage: null);
     try {
-      final updated = await _repository.updateTask(updatedTask);
-      _replaceTask(updatedTask.id, updated);
-    } catch (error) {
-      _enqueueOperation(TaskOperationType.update, updatedTask);
-      state = state.copyWith(errorMessage: error.toString(), isOffline: true);
+      final updatedTask = await _repo.updateTask(id, patch);
+      final updated = state.items.map((t) => t.id == id ? updatedTask : t).toList();
+      state = state.copyWith(items: updated, isLoading: false);
+      await _cache.write(updated);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }
 
-  Future<void> _executeDelete(Task deletedTask) async {
+  Future<void> remove(String id) async {
+    // optimistic
+    final before = state.items;
+    final updated = before.where((t) => t.id != id).toList();
+    state = state.copyWith(items: updated, errorMessage: null);
+    await _cache.write(updated);
+
     try {
-      await _repository.deleteTask(deletedTask.id);
-      _removeTask(deletedTask.id);
-    } catch (error) {
-      _enqueueOperation(TaskOperationType.delete, deletedTask);
-      state = state.copyWith(errorMessage: error.toString(), isOffline: true);
+      await _repo.deleteTask(id);
+    } catch (e) {
+      // откат
+      state = state.copyWith(items: before, errorMessage: e.toString());
+      await _cache.write(before);
     }
-  }
-
-  void _applyOrInsert(Task task) {
-    final tasks = [...state.tasks];
-    final index = tasks.indexWhere((element) => element.id == task.id);
-    if (index == -1) {
-      tasks.add(task);
-    } else {
-      tasks[index] = task;
-    }
-    state = state.copyWith(tasks: tasks);
-  }
-
-  String _generateRequestId({String prefix = 'req'}) {
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    return '$prefix-$timestamp';
-  }
-
-  void _scheduleRetry() {
-    _retryTimer ??= Timer.periodic(const Duration(seconds: 4), (_) {
-      unawaited(_flushQueue(force: true));
-    });
-  }
-
-  void _cancelRetry() {
-    _retryTimer?.cancel();
-    _retryTimer = null;
   }
 }
-
-final tasksControllerProvider = StateNotifierProvider<TasksController, TasksState>((ref) {
-  final repository = ref.read(tasksRepositoryProvider);
-  return TasksController(repository);
-});

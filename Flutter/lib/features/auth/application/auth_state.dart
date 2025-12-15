@@ -1,38 +1,32 @@
-import '../domain/auth_error_code.dart';
+import '../../../domain/user.dart';
 
-class AuthState {
-  const AuthState({
-    this.isLoading = false,
-    this.isAuthenticated = false,
-    this.email,
-    this.token,
-    this.errorMessage,
-    this.errorCode,
-  });
+sealed class AuthState {
+  const AuthState();
 
-  final bool isLoading;
-  final bool isAuthenticated;
-  final String? email;
-  final String? token;
-  final String? errorMessage;
-  final AuthErrorCode? errorCode;
+  bool get isLoading => this is AuthLoading;
+  bool get isAuthenticated => this is AuthAuthenticated;
 
-  AuthState copyWith({
-    bool? isLoading,
-    bool? isAuthenticated,
-    String? email,
-    String? token,
-    String? errorMessage,
-    AuthErrorCode? errorCode,
-    bool clearError = false,
-  }) {
-    return AuthState(
-      isLoading: isLoading ?? this.isLoading,
-      isAuthenticated: isAuthenticated ?? this.isAuthenticated,
-      email: email ?? this.email,
-      token: token ?? this.token,
-      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
-      errorCode: clearError ? null : (errorCode ?? this.errorCode),
-    );
-  }
+  String? get errorMessage => (this is AuthError) ? (this as AuthError).message : null;
+}
+
+class AuthInitial extends AuthState {
+  const AuthInitial();
+}
+
+class AuthLoading extends AuthState {
+  const AuthLoading();
+}
+
+class AuthAuthenticated extends AuthState {
+  const AuthAuthenticated({required this.user});
+  final User user;
+}
+
+class AuthUnauthenticated extends AuthState {
+  const AuthUnauthenticated();
+}
+
+class AuthError extends AuthState {
+  const AuthError(this.message);
+  final String message;
 }
