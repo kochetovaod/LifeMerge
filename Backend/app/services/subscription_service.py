@@ -23,6 +23,16 @@ def _resolve_trial_dates(user: User) -> tuple[datetime | None, datetime | None]:
     return start, end
 
 
+def activate_trial(user: User) -> User:
+    """Force-start a trial window for the given user."""
+
+    now = datetime.now(timezone.utc)
+    user.trial_started_at = now
+    user.trial_ends_at = now + TRIAL_PERIOD
+    user.is_pro = False
+    return user
+
+
 def subscription_status(user: User) -> SubscriptionStatusOut:
     now = datetime.now(timezone.utc)
     trial_start, trial_end = _resolve_trial_dates(user)
