@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, Field, FieldValidationInfo, field_validator
@@ -31,4 +31,38 @@ class PlannerRunIn(BaseModel):
 class PlannerRunOut(BaseModel):
     plan_request_id: uuid.UUID
     status: str
+    request_id: str
+
+
+class PlannerSlot(BaseModel):
+    slot_id: uuid.UUID
+    task_id: uuid.UUID | None = None
+    title: str
+    description: str | None = None
+    start_at: datetime
+    end_at: datetime
+
+    @property
+    def duration_minutes(self) -> int:
+        return int((self.end_at - self.start_at).total_seconds() // 60)
+
+
+class PlannerPlanOut(BaseModel):
+    plan_request_id: uuid.UUID
+    status: str
+    slots: list[PlannerSlot]
+    request_id: str
+
+
+class PlannerDecisionIn(BaseModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["accept", "decline"]
+    accepted_slot_ids: list[uuid.UUID] | None = None
+
+
+class PlannerDecisionOut(BaseModel):
+    plan_request_id: uuid.UUID
+    status: str
+    created_task_ids: list[uuid.UUID]
+    updated_task_ids: list[uuid.UUID]
     request_id: str

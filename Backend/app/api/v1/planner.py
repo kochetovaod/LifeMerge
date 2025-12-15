@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request
+import uuid
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.idempotency import enforce_idempotency
 from app.core.logging import log
-from app.core.response import ok
+from app.core.response import err, ok
 from app.db.session import get_db
-from app.schemas.planner import PlannerRunIn, PlannerRunOut
-from app.services.planner_service import enqueue_planner_run
+from app.schemas.planner import (
+    PlannerDecisionIn,
+    PlannerDecisionOut,
+    PlannerPlanOut,
+    PlannerRunIn,
+    PlannerRunOut,
+)
+from app.services.planner_service import apply_plan_decision, enqueue_planner_run, get_plan_by_request_id
 
 router = APIRouter(prefix="/planner")
 
@@ -40,3 +47,75 @@ async def run_ai_planner(
     )
 
     return ok(request, result)
+
+
+@router.get("/{plan_request_id}", response_model=PlannerPlanOut)
+async def get_ai_plan(
+    request: Request,
+    plan_request_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+):
+    plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=current_user.id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Plan not found"))
+
+    payload = {
+        "plan_request_id": plan_request_id,
+        "status": plan["status"],
+        "slots": plan["slots"],
+        "request_id": request.state.request_id,
+    }
+
+    log.info(
+        "planner_plan_retrieved",
+        request_id=request.state.request_id,
+        user_id=str(current_user.id),
+        plan_request_id=str(plan_request_id),
+        slots=len(plan.get("slots", [])),
+    )
+    return ok(request, payload)
+
+
+@router.post("/{plan_request_id}/decision", response_model=PlannerDecisionOut)
+async def decide_ai_plan(
+    request: Request,
+    plan_request_id: uuid.UUID,
+    body: PlannerDecisionIn,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+):
+    await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
+
+    try:
+        accepted_slots = set(body.accepted_slot_ids) if body.accepted_slot_ids else None
+        decision_result = await apply_plan_decision(
+            db,
+            plan_request_id=plan_request_id,
+            user_id=current_user.id,
+            decision=body.decision,
+            accepted_slots=accepted_slots,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Plan not found"))
+
+    await db.commit()
+
+    log.info(
+        "planner_plan_decision",
+        request_id=request.state.request_id,
+        user_id=str(current_user.id),
+        plan_request_id=str(plan_request_id),
+        decision=body.decision,
+        accepted_slots=len(body.accepted_slot_ids or []),
+    )
+
+    payload = {
+        "plan_request_id": plan_request_id,
+        "status": decision_result["status"],
+        "created_task_ids": decision_result.get("created_task_ids", []),
+        "updated_task_ids": decision_result.get("updated_task_ids", []),
+        "request_id": body.request_id,
+    }
+
+    return ok(request, payload)
