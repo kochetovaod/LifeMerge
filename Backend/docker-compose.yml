@@ -23,11 +23,32 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-CHANGE_ME_IN_STAGE_AND_PROD}
       CORS_ALLOW_ORIGINS: '["*"]'
       DEFAULT_TIMEZONE: "UTC"
+      AI_SERVICE_URL: http://ai-service:9000
+      AI_SERVICE_AUTH_TOKEN: ${AI_INTERNAL_TOKEN:-ai-internal-token}
+      AI_SERVICE_TIMEOUT_SECONDS: 30
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      ai-service:
+        condition: service_started
+
+  ai-service:
+    build:
+      context: ./ai_service
+    environment:
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:-ai-internal-token}
+      PLANNER_MAX_BATCH: 128
+    expose:
+      - "9000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 2
 
 volumes:
   pgdata:

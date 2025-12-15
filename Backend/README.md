@@ -44,3 +44,6 @@ docker compose up --build
 ## Notes
 - Tables are auto-created on startup for skeleton usage. Production should use Alembic migrations.
 - Forgot/Reset are stubs by design in Sprint 01.
+- AI planner now runs as a dedicated service (`ai-service`) reachable only inside the compose network. The main API
+  authenticates with `X-AI-Internal-Token` to request batch plan generation. Scale the service for heavy batch loads via
+  `docker compose up --scale ai-service=4` or adjust `deploy.replicas` in `docker-compose.yml`.

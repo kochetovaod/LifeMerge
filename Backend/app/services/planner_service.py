@@ -4,9 +4,11 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
+import httpx
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import log
 from app.repositories import tasks_repo
 from app.schemas.planner import PlannerSlot
@@ -28,10 +30,11 @@ async def enqueue_planner_run(
         payload={"plan_request_id": str(plan_request_id), **payload},
     )
 
-    slots = _generate_slots(week_start=payload.get("week_start"))
+    plan = await _request_plan_from_ai(request=request, plan_request_id=plan_request_id, payload=payload)
+    slots = plan["slots"]
     _GENERATED_PLANS[plan_request_id] = {
         "user_id": user_id,
-        "status": "ready",
+        "status": plan["status"],
         "slots": slots,
         "created_at": datetime.now(timezone.utc),
     }
@@ -146,3 +149,69 @@ async def apply_plan_decision(
     plan["updated_task_ids"] = updated
 
     return {"status": plan["status"], "created_task_ids": created, "updated_task_ids": updated}
+
+
+async def _request_plan_from_ai(
+    *, request: Request, plan_request_id: uuid.UUID, payload: dict[str, Any]
+) -> dict[str, Any]:
+    endpoint = f"{settings.AI_SERVICE_URL.rstrip('/')}/v1/planner/batch-run"
+    headers = {"X-AI-Internal-Token": settings.AI_SERVICE_AUTH_TOKEN}
+    body = {
+        "request_id": request.state.request_id,
+        "requests": [
+            {
+                "plan_request_id": str(plan_request_id),
+                "week_start": payload.get("week_start"),
+                "work_schedule": payload.get("work_schedule", []),
+                "subscription_status": payload.get("subscription_status", "pro"),
+            }
+        ],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.AI_SERVICE_TIMEOUT_SECONDS) as client:
+            response = await client.post(endpoint, json=body, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "ai_planner_request_failed",
+            request_id=request.state.request_id,
+            plan_request_id=str(plan_request_id),
+            endpoint=endpoint,
+            error=str(exc),
+        )
+        # Fall back to local generation to avoid user-facing failures
+        fallback_slots = _generate_slots(week_start=payload.get("week_start"))
+        return {"status": "ready", "slots": fallback_slots}
+
+    plans = result.get("plans") or []
+    plan_data = next((p for p in plans if str(p.get("plan_request_id")) == str(plan_request_id)), None)
+    if not plan_data:
+        log.error(
+            "ai_planner_missing_plan",
+            request_id=request.state.request_id,
+            plan_request_id=str(plan_request_id),
+            error="plan_not_returned",
+        )
+        fallback_slots = _generate_slots(week_start=payload.get("week_start"))
+        return {"status": "ready", "slots": fallback_slots}
+
+    slots: list[PlannerSlot] = []
+    for slot_data in plan_data.get("slots", []):
+        try:
+            slot = PlannerSlot.model_validate(slot_data)
+            slots.append(slot)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "ai_planner_slot_invalid",
+                request_id=request.state.request_id,
+                plan_request_id=str(plan_request_id),
+                slot_payload=slot_data,
+                error=str(exc),
+            )
+
+    if not slots:
+        slots = _generate_slots(week_start=payload.get("week_start"))
+
+    return {"status": plan_data.get("status", "ready"), "slots": slots}
