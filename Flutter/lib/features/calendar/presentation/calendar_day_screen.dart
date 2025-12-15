@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../tasks/application/tasks_controller.dart';
 import '../../tasks/domain/task.dart';
 import '../application/calendar_controller.dart';
+import '../application/calendar_state.dart';
 import '../domain/calendar_event.dart';
 import 'widgets/event_form_sheet.dart';
+import '../../../presentation/widgets/sync_status_banner.dart';
 
 class CalendarDayScreen extends ConsumerStatefulWidget {
   const CalendarDayScreen({super.key});
@@ -123,6 +125,22 @@ class _CalendarDayScreenState extends ConsumerState<CalendarDayScreen> {
     final calendarState = ref.watch(calendarControllerProvider);
     final calendarController = ref.read(calendarControllerProvider.notifier);
     final tasksState = ref.watch(tasksControllerProvider);
+    final calendarHasConflict =
+        calendarState.errorMessage?.toLowerCase().contains('conflict') ?? false;
+    final calendarQueueItems = calendarState.pendingOperations
+        .map(
+          (operation) => SyncQueueItem(
+            id: operation.requestId,
+            title: operation.event.title.isNotEmpty
+                ? operation.event.title
+                : 'Untitled event',
+            description: _calendarOperationDescription(operation),
+            enqueuedAt: operation.enqueuedAt,
+            typeLabel: _calendarOperationLabel(operation.type),
+            isConflict: calendarHasConflict,
+          ),
+        )
+        .toList();
 
     final events = _eventsForDay([...calendarState.events]);
     final tasks = tasksState.tasks
@@ -189,38 +207,14 @@ class _CalendarDayScreenState extends ConsumerState<CalendarDayScreen> {
             onPrevious: () => _changeDay(-1),
             onNext: () => _changeDay(1),
           ),
-          if (calendarState.errorMessage != null)
-            MaterialBanner(
-              content: Text(calendarState.errorMessage!),
-              leading: const Icon(Icons.error_outline),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: calendarController.clearError,
-                  child: const Text('Dismiss'),
-                ),
-              ],
-            ),
-          if (calendarState.pendingOperations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.sync_problem_outlined),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Queued: ${calendarState.pendingOperations.length} changes waiting for connection',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                  if (!calendarState.isOffline)
-                    TextButton(
-                      onPressed: calendarController.syncPending,
-                      child: const Text('Sync now'),
-                    ),
-                ],
-              ),
-            ),
+          SyncStatusBanner(
+            isOffline: calendarState.isOffline,
+            queueItems: calendarQueueItems,
+            onSyncNow: calendarController.syncPending,
+            errorMessage: calendarState.errorMessage,
+            onDismissError: calendarController.clearError,
+            title: 'Calendar sync',
+          ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -314,6 +308,29 @@ class _CalendarDayScreenState extends ConsumerState<CalendarDayScreen> {
         ],
       ),
     );
+  }
+
+  String _calendarOperationLabel(CalendarOperationType type) {
+    switch (type) {
+      case CalendarOperationType.create:
+        return 'Create';
+      case CalendarOperationType.update:
+        return 'Update';
+      case CalendarOperationType.delete:
+        return 'Delete';
+    }
+  }
+
+  String _calendarOperationDescription(PendingCalendarOperation operation) {
+    final title = operation.event.title.isNotEmpty ? operation.event.title : 'event';
+    switch (operation.type) {
+      case CalendarOperationType.create:
+        return 'New event "$title" queued';
+      case CalendarOperationType.update:
+        return 'Changes to "$title" will sync';
+      case CalendarOperationType.delete:
+        return 'Delete "$title" when online';
+    }
   }
 }
 

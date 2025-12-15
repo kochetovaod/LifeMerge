@@ -29,6 +29,16 @@ class SettingsScreen extends ConsumerWidget {
                 subtitle: Text(l10n.logoutDescription),
               ),
             ),
+            const SizedBox(height: 12),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.tune),
+                title: Text(l10n.aiRulesTitle),
+                subtitle: Text(l10n.profileScheduleTitle),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push(Routes.aiRules),
+              ),
+            ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: authState.isLoading
