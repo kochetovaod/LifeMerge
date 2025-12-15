@@ -48,11 +48,25 @@ def subscription_status(user: User) -> SubscriptionStatusOut:
     limits = {
         "free": PlanLimits(
             ai_planner_access=False,
+            analytics_access=False,
             max_ai_plans_per_week=0,
+            max_goals=settings.FREE_MAX_GOALS,
+            max_tasks=settings.FREE_MAX_TASKS,
+            max_finance_accounts=settings.FREE_MAX_FINANCE_ACCOUNTS,
             notes="AI planner and advanced automations are not available on the Free plan.",
+        ),
+        "trial": PlanLimits(
+            ai_planner_access=True,
+            analytics_access=True,
+            max_ai_plans_per_week=settings.AI_PLANNER_MAX_BATCH,
+            max_goals=settings.FREE_MAX_GOALS,
+            max_tasks=settings.FREE_MAX_TASKS,
+            max_finance_accounts=settings.FREE_MAX_FINANCE_ACCOUNTS,
+            notes="Trial users can access AI with soft limits inherited from the Free tier.",
         ),
         "pro": PlanLimits(
             ai_planner_access=True,
+            analytics_access=True,
             max_ai_plans_per_week=None,
             notes="Full AI planner access with no weekly cap.",
         ),
