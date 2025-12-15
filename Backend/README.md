@@ -47,3 +47,7 @@ docker compose up --build
 - AI planner now runs as a dedicated service (`ai-service`) reachable only inside the compose network. The main API
   authenticates with `X-AI-Internal-Token` to request batch plan generation. Scale the service for heavy batch loads via
   `docker compose up --scale ai-service=4` or adjust `deploy.replicas` in `docker-compose.yml`.
+
+## Tests
+- Unit + integration tests use `pytest` with async support for API routes and a SQLite-backed test database.
+- Run all backend tests: `pytest`

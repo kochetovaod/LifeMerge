@@ -1,1 +1,1 @@
-Здесь пока пусто
+"""Backend application package."""

@@ -1,1 +1,1 @@
-Здесь пока пусто
+"""Pydantic schemas package."""

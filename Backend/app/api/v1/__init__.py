@@ -1,1 +1,1 @@
-Здесь пока пусто
+"""Versioned API v1 package."""
