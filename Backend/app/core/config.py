@@ -26,5 +26,8 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: list[str] = ["*"]
     DEFAULT_TIMEZONE: str = "UTC"
 
+    # Subscriptions
+    TRIAL_PERIOD_DAYS: int = 14
+
 
 settings = Settings()
