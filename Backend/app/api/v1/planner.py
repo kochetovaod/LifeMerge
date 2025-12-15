@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.ai_access import ensure_ai_access
 from app.api.deps import get_current_user
 from app.api.idempotency import enforce_idempotency
 from app.core.logging import log
@@ -29,6 +30,7 @@ async def run_ai_planner(
     db: AsyncSession = Depends(get_db),
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
+    ensure_ai_access(request, subscription_status=body.subscription_status)
     await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
 
     planner_payload = {

@@ -25,7 +25,7 @@ class PlannerRunIn(BaseModel):
     request_id: str = Field(min_length=1, max_length=128)
     week_start: date | None = None
     work_schedule: list[WorkScheduleEntry] = Field(default_factory=list)
-    subscription_status: Literal["pro", "trial"]
+    subscription_status: Literal["pro", "trial", "free"]
 
 
 class PlannerRunOut(BaseModel):
