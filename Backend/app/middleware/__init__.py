@@ -1,1 +1,1 @@
-Здесь пока пусто
+"""Custom middleware package."""

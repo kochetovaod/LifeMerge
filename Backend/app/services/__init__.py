@@ -1,1 +1,1 @@
-Здесь пока пусто
+"""Service layer package."""
