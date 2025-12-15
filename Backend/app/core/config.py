@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: list[str] = ["*"]
     DEFAULT_TIMEZONE: str = "UTC"
 
+    # AI planner service
+    AI_SERVICE_URL: str = "http://ai-service:9000"
+    AI_SERVICE_AUTH_TOKEN: str = "ai-internal-token"
+    AI_SERVICE_TIMEOUT_SECONDS: int = 30
+
+    # Batch planner tuning
+    AI_PLANNER_MAX_BATCH: int = 50
+
     # Subscriptions
     TRIAL_PERIOD_DAYS: int = 14
 
