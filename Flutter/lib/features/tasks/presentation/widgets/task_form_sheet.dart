@@ -6,10 +6,14 @@ class TaskFormSheet extends StatefulWidget {
   const TaskFormSheet({
     super.key,
     this.initialTask,
+    this.initialTitle,
+    this.initialDescription,
     required this.onSubmit,
   });
 
   final Task? initialTask;
+  final String? initialTitle;
+  final String? initialDescription;
   final void Function(TaskDraft) onSubmit;
 
   @override
@@ -37,7 +41,8 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
       _status = task.status;
       _estimatedMinutes = task.estimatedMinutes;
     } else {
-      _title = '';
+      _title = widget.initialTitle ?? '';
+      _description = widget.initialDescription;
     }
   }
 

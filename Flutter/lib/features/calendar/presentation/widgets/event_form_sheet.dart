@@ -10,6 +10,7 @@ class EventFormSheet extends StatefulWidget {
     this.initialEndAt,
     this.initialTaskId,
     this.initialTaskTitle,
+    this.initialTitle,
     required this.onSubmit,
   });
 
@@ -18,6 +19,7 @@ class EventFormSheet extends StatefulWidget {
   final DateTime? initialEndAt;
   final String? initialTaskId;
   final String? initialTaskTitle;
+  final String? initialTitle;
   final void Function(CalendarEventDraft) onSubmit;
 
   @override
@@ -36,7 +38,8 @@ class _EventFormSheetState extends State<EventFormSheet> {
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.initialEvent?.title ?? '');
+    _titleController =
+        TextEditingController(text: widget.initialEvent?.title ?? widget.initialTitle ?? '');
     _descriptionController =
         TextEditingController(text: widget.initialEvent?.description ?? '');
     _startAt =
