@@ -5,6 +5,7 @@ import '../application/tasks_controller.dart';
 import '../domain/task.dart';
 import 'widgets/task_form_sheet.dart';
 import 'widgets/task_list_item.dart';
+import '../../../presentation/widgets/sync_status_banner.dart';
 
 class TasksScreen extends ConsumerWidget {
   const TasksScreen({super.key});
@@ -31,6 +32,21 @@ class TasksScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(tasksControllerProvider);
     final controller = ref.read(tasksControllerProvider.notifier);
+    final hasConflict = state.errorMessage?.toLowerCase().contains('conflict') ?? false;
+    final queueItems = state.pendingOperations
+        .map(
+          (operation) => SyncQueueItem(
+            id: operation.requestId,
+            title: operation.task.title.isNotEmpty
+                ? operation.task.title
+                : 'Untitled task',
+            description: _operationDescription(operation),
+            enqueuedAt: operation.enqueuedAt,
+            typeLabel: _operationLabel(operation.type),
+            isConflict: hasConflict,
+          ),
+        )
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -71,38 +87,14 @@ class TasksScreen extends ConsumerWidget {
       ),
       body: Column(
         children: <Widget>[
-          if (state.errorMessage != null)
-            MaterialBanner(
-              content: Text(state.errorMessage!),
-              leading: const Icon(Icons.error_outline),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: controller.clearError,
-                  child: const Text('Dismiss'),
-                ),
-              ],
-            ),
-          if (state.pendingOperations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.sync_problem_outlined),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Queued: ${state.pendingOperations.length} ops waiting for connection',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                  if (!state.isOffline)
-                    TextButton(
-                      onPressed: controller.syncPending,
-                      child: const Text('Sync now'),
-                    ),
-                ],
-              ),
-            ),
+          SyncStatusBanner(
+            isOffline: state.isOffline,
+            queueItems: queueItems,
+            onSyncNow: controller.syncPending,
+            errorMessage: state.errorMessage,
+            onDismissError: controller.clearError,
+            title: 'Tasks sync',
+          ),
           Expanded(
             child: state.isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -123,6 +115,29 @@ class TasksScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  String _operationLabel(TaskOperationType type) {
+    switch (type) {
+      case TaskOperationType.create:
+        return 'Create';
+      case TaskOperationType.update:
+        return 'Update';
+      case TaskOperationType.delete:
+        return 'Delete';
+    }
+  }
+
+  String _operationDescription(PendingTaskOperation operation) {
+    final title = operation.task.title.isNotEmpty ? operation.task.title : 'task';
+    switch (operation.type) {
+      case TaskOperationType.create:
+        return 'New task "$title" queued';
+      case TaskOperationType.update:
+        return 'Changes to "$title" will sync';
+      case TaskOperationType.delete:
+        return 'Delete "$title" when online';
+    }
   }
 }
 
