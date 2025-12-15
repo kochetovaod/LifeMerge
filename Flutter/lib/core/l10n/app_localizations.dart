@@ -66,6 +66,37 @@ class AppLocalizations {
   String get logout => isRu ? 'Выйти' : 'Log out';
   String get logoutDescription =>
       isRu ? 'Очистить сессию и вернуться на экран входа' : 'Clear your session and return to sign in';
+  String get aiRulesTitle =>
+      isRu ? 'Правила ассистента' : 'AI rules';
+  String get addBreak => isRu ? 'Пауза' : 'Add break';
+  String get profileScheduleTitle =>
+      isRu ? 'Профиль и рабочий график' : 'Profile & work schedule';
+  String get profileScheduleHint => isRu
+      ? 'AI использует рабочие часы и дни, чтобы предлагать встречи и фильтровать уведомления'
+      : 'AI uses your working hours and days to propose meetings and filter notifications';
+  String get timezoneLabel => isRu ? 'Часовой пояс:' : 'Timezone:';
+  String get quietHoursTitle => isRu ? 'Часы тишины' : 'Quiet hours';
+  String get quietHoursDescription => isRu
+      ? 'В это время AI не будет создавать встречи и включит режим «Не беспокоить»'
+      : 'During these hours AI will avoid scheduling and enable do-not-disturb.';
+  String get startLabel => isRu ? 'Начало' : 'Start';
+  String get endLabel => isRu ? 'Конец' : 'End';
+  String get breaksTitle => isRu ? 'Паузы и перерывы' : 'Breaks & downtime';
+  String get breaksDescription => isRu
+      ? 'Запланированные паузы учитываются при планировании задач и встреч'
+      : 'Scheduled downtime is respected when placing tasks and meetings.';
+  String durationLabel(Duration duration) => isRu
+      ? 'Длительность: ${duration.inMinutes} мин.'
+      : 'Duration: ${duration.inMinutes} min';
+  String get forbiddenDaysTitle => isRu ? 'Запретные дни' : 'Forbidden days';
+  String get forbiddenDaysDescription => isRu
+      ? 'В выбранные дни AI не создаёт встречи и не беспокоит вас'
+      : 'On these days AI will not schedule meetings or disturb you.';
+  String get forbiddenWorkdayTooltip => isRu
+      ? 'Этот день отмечен рабочим в профиле'
+      : 'This is marked as a working day in your profile';
+  String get forbiddenDayTooltip =>
+      isRu ? 'Неназначаемый день' : 'Marked as unavailable';
 }
 
 class _AppLocalizationsDelegate

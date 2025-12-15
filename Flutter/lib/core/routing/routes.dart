@@ -7,5 +7,6 @@ abstract final class Routes {
   static const String tasks = '/tasks';
   static const String inbox = '/inbox';
   static const String settings = '/settings';
+  static const String aiRules = '/settings/ai-rules';
   static const String pro = '/pro';
 }
