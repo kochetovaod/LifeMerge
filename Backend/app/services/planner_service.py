@@ -19,6 +19,7 @@ from app.schemas.planner import (
     PlannerTaskIn,
 )
 from app.services.events import publish_event
+from app.services.observability import log_ai_request
 from app.services.tasks_service import create_task, update_task
 
 _GENERATED_PLANS: dict[uuid.UUID, dict[str, Any]] = {}
@@ -448,9 +449,18 @@ async def _request_plan_from_ai(
     }
 
     try:
+        start_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         async with httpx.AsyncClient(timeout=settings.AI_SERVICE_TIMEOUT_SECONDS) as client:
             response = await client.post(endpoint, json=body, headers=headers)
         response.raise_for_status()
+        latency_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - start_ms
+        log_ai_request(
+            request_id=request.state.request_id,
+            user_id=str(payload.get("user_id")),
+            payload={"plan_request_id": str(plan_request_id), "previous_version": previous_version},
+            status="success",
+            latency_ms=latency_ms,
+        )
         result = response.json()
     except Exception as exc:  # noqa: BLE001
         log.error(
@@ -459,6 +469,12 @@ async def _request_plan_from_ai(
             plan_request_id=str(plan_request_id),
             endpoint=endpoint,
             error=str(exc),
+        )
+        log_ai_request(
+            request_id=request.state.request_id,
+            user_id=str(payload.get("user_id")),
+            payload={"plan_request_id": str(plan_request_id), "previous_version": previous_version},
+            status="failed",
         )
         # Fall back to local generation to avoid user-facing failures
         fallback_slots, fallback_conflicts = _generate_slots(

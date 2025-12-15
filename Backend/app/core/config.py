@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: list[str] = ["*"]
     DEFAULT_TIMEZONE: str = "UTC"
 
+    # Push notifications
+    FCM_SERVER_KEY: str = "CHANGE_ME_IN_STAGE_AND_PROD"
+    APNS_KEY_ID: str | None = None
+    APNS_TEAM_ID: str | None = None
+    APNS_KEY_PATH: str | None = None
+    PUSH_DEFAULT_TOPIC: str = "lifemerge"
+    DIGEST_DEFAULT_CADENCE: str = "daily"
+    DIGEST_SEND_HOUR_UTC: int = 7
+
+    # Background processing
+    SYNC_QUEUE_BATCH_SIZE: int = 50
+    SYNC_RETRY_MINUTES: int = 5
+
     # AI planner service
     AI_SERVICE_URL: str = "http://ai-service:9000"
     AI_SERVICE_AUTH_TOKEN: str = "ai-internal-token"
@@ -36,6 +49,11 @@ class Settings(BaseSettings):
 
     # Subscriptions
     TRIAL_PERIOD_DAYS: int = 14
+    FREE_MAX_GOALS: int = 5
+    FREE_MAX_TASKS: int = 100
+    FREE_MAX_FINANCE_ACCOUNTS: int = 1
+    AI_ALLOWED_PLANS: list[str] = ["pro", "trial"]
+    ANALYTICS_ALLOWED_PLANS: list[str] = ["pro"]
 
 
 settings = Settings()

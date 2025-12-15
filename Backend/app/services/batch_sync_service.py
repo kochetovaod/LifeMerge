@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.task import Task
 from app.schemas.sync import BatchSyncOperation, BatchSyncResult
 from app.schemas.tasks import ALLOWED_STATUSES, TaskOut
+from app.services.observability import log_sync_error
 
 
 async def process_batch_operations(
@@ -28,6 +29,7 @@ async def process_batch_operations(
                 status="unsupported",
                 reason="Unsupported entity type",
             )
+            log_sync_error(user_id=str(user_id), entity=op.entity, action=op.action, reason="unsupported_entity")
         results.append(result)
 
     return results
