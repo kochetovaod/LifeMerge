@@ -27,6 +27,7 @@ def ensure_ai_access(request: Request, *, subscription_status: str) -> None:
                 details={
                     "allowed_statuses": list(allowed),
                     "restrictions": "Free plan does not include AI planner access. Upgrade or start a trial to continue.",
+                    "trial_offer": "Start a free trial to unlock AI planning.",
                 },
             ),
         )
