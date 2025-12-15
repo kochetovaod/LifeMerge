@@ -8,11 +8,13 @@ class TaskListItem extends StatelessWidget {
     required this.task,
     this.onTap,
     this.onDelete,
+    this.onToggleStatus,
   });
 
   final Task task;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
+  final ValueChanged<TaskStatus>? onToggleStatus;
 
   Color _priorityColor(TaskPriority priority, BuildContext context) {
     switch (priority) {
@@ -53,16 +55,12 @@ class TaskListItem extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(
-                height: 10,
-                width: 10,
-                margin: const EdgeInsets.only(top: 4),
-                decoration: BoxDecoration(
-                  color: _priorityColor(task.priority, context),
-                  shape: BoxShape.circle,
-                ),
+              Checkbox(
+                value: task.status == TaskStatus.done,
+                onChanged: onToggleStatus == null
+                    ? null
+                    : (value) => onToggleStatus!(value == true ? TaskStatus.done : TaskStatus.todo),
               ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,6 +83,11 @@ class TaskListItem extends StatelessWidget {
                         spacing: 8,
                         runSpacing: 4,
                         children: <Widget>[
+                          Chip(
+                            backgroundColor: _priorityColor(task.priority, context).withOpacity(0.15),
+                            visualDensity: VisualDensity.compact,
+                            label: Text('Prior: ${task.priority.name}'),
+                          ),
                           Chip(
                             label: Text(_statusLabel(task.status)),
                             backgroundColor: Theme.of(context)

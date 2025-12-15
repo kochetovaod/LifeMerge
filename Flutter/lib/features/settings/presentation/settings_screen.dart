@@ -39,6 +39,33 @@ class SettingsScreen extends ConsumerWidget {
                 onTap: () => context.push(Routes.aiRules),
               ),
             ),
+            const SizedBox(height: 12),
+            Card(
+              child: Column(
+                children: <Widget>[
+                  ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: const Text('Профиль и устройства'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push(Routes.profile),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.notifications_active_outlined),
+                    title: const Text('Уведомления'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push(Routes.notifications),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.account_balance_wallet_outlined),
+                    title: const Text('Финансы и бюджет'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push(Routes.finance),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: authState.isLoading

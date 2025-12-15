@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../tasks/application/tasks_controller.dart';
 import '../../tasks/domain/task.dart';
@@ -10,6 +11,7 @@ import '../application/calendar_state.dart';
 import '../domain/calendar_event.dart';
 import 'widgets/event_form_sheet.dart';
 import '../../../presentation/widgets/sync_status_banner.dart';
+import '../../../core/routing/routes.dart';
 
 class CalendarDayScreen extends ConsumerStatefulWidget {
   const CalendarDayScreen({super.key});
@@ -156,6 +158,11 @@ class _CalendarDayScreenState extends ConsumerState<CalendarDayScreen> {
       appBar: AppBar(
         title: const Text('Calendar'),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'Неделя',
+            icon: const Icon(Icons.view_week_outlined),
+            onPressed: () => context.go(Routes.calendarWeek),
+          ),
           IconButton(
             tooltip: calendarState.isOffline ? 'Offline mode' : 'Go offline',
             icon: Stack(

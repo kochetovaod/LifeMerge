@@ -9,7 +9,7 @@ class AppShell extends StatelessWidget {
   final Widget child;
 
   int _indexForLocation(String location) {
-    if (location.startsWith(Routes.calendarDay)) return 0;
+    if (location.startsWith(Routes.calendarDay) || location.startsWith(Routes.calendarWeek)) return 0;
     if (location.startsWith(Routes.tasks)) return 1;
     if (location.startsWith(Routes.inbox)) return 2;
     if (location.startsWith(Routes.settings)) return 3;
