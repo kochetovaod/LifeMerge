@@ -1,0 +1,25 @@
+# Misc
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Dart/Flutter
+.dart_tool/
+.packages
+.pub/
+build/
+
+# Platform folders will be added when we generate a full Flutter project scaffold.
+android/
+ios/
+macos/
+windows/
+linux/
+web/
+
+# Generated
+**/*.g.dart
+**/*.freezed.dart
+lifemerge-flutter.txt
+combine_md.sh

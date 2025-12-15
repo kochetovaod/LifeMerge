@@ -1,0 +1,50 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://lifemerge.ai/schemas/planner/v1/plan_week_request.json",
+    "title": "PlanWeekRequest",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "period",
+        "tasks",
+        "calendar",
+        "preferences",
+        "goals",
+        "metadata"
+    ],
+    "properties": {
+        "period": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "start_utc",
+                "end_utc"
+            ],
+            "properties": {
+                "start_utc": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "end_utc": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "tasks": {
+            "$ref": "tasks_min.json"
+        },
+        "calendar": {
+            "$ref": "calendar_min.json"
+        },
+        "preferences": {
+            "$ref": "preferences.json"
+        },
+        "goals": {
+            "$ref": "goals_min.json"
+        },
+        "metadata": {
+            "$ref": "metadata.json"
+        }
+    }
+}

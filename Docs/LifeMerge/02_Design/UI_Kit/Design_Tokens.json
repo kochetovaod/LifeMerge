@@ -1,0 +1,23 @@
+{
+  "colors": {
+    "primary": "#5B8DEF",
+    "primaryDark": "#3562C2",
+    "accent": "#FF9F1C",
+    "success": "#34C759",
+    "error": "#FF3B30",
+    "bg": "#0F1115",
+    "surface": "#181C22",
+    "textPrimary": "#FFFFFF",
+    "textSecondary": "#B8C2D1"
+  },
+  "typography": {
+    "fontFamily": "Inter",
+    "h1": {"size": 32, "weight": 700, "lineHeight": 38},
+    "h2": {"size": 24, "weight": 700, "lineHeight": 30},
+    "body": {"size": 16, "weight": 400, "lineHeight": 22},
+    "caption": {"size": 13, "weight": 400, "lineHeight": 18}
+  },
+  "radius": {"s": 8, "m": 12, "l": 16},
+  "spacing": {"xs": 4, "s": 8, "m": 12, "l": 16, "xl": 24},
+  "elevation": {"card": 8, "sheet": 16}
+}

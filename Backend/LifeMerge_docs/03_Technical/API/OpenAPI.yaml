@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: LifeMerge API
+  version: 1.0.0
+servers:
+  - url: https://api.stage.lifemerge/v1
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    AcceptLanguage:
+      in: header
+      name: Accept-Language
+      schema: { type: string, example: ru-RU }
+      required: false
+      description: UI локализация, влияет на тексты ошибок и уведомлений
+    Timezone:
+      in: header
+      name: X-Timezone
+      schema: { type: string, example: Europe/Moscow }
+      required: false
+      description: Часовой пояс клиента, используется для дат и повторений
+    Cursor:
+      in: query
+      name: cursor
+      schema: { type: string }
+      required: false
+      description: Токен курсора для пагинации
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      required: false
+      description: Количество элементов в ответе
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+    Task:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        goal_id: { type: string, format: uuid, nullable: true }
+        due_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        deleted: { type: boolean }
+    TaskCreate:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        goal_id: { type: string, format: uuid }
+        due_at: { type: string, format: date-time }
+        request_id: { type: string }
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+        - $ref: '#/components/parameters/Timezone'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                device_id: { type: string }
+      responses:
+        '200':
+          description: tokens
+        '401':
+          description: invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /tasks:
+    get:
+      summary: List tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+        - $ref: '#/components/parameters/Timezone'
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: goal_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: due_from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: due_to
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }
+                  next_cursor: { type: string, nullable: true }
+        '401':
+          description: unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    post:
+      summary: Create task
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+        - $ref: '#/components/parameters/Timezone'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreate'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '409':
+          description: conflict (duplicate request_id)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }

@@ -1,0 +1,69 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://lifemerge.ai/schemas/planner/v1/plan_week_response.json",
+    "title": "PlanWeekResponse",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "plan",
+        "notes",
+        "model_version"
+    ],
+    "properties": {
+        "plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "starts_at",
+                    "ends_at",
+                    "type"
+                ],
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "task",
+                            "rest",
+                            "focus"
+                        ]
+                    },
+                    "task_id": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                }
+            }
+        },
+        "notes": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "maxLength": 280
+            },
+            "maxItems": 32
+        },
+        "constraints_applied": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "maxLength": 64
+            },
+            "maxItems": 64
+        },
+        "model_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+        }
+    }
+}

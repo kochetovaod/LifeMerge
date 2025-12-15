@@ -1,0 +1,17 @@
+Entities:
+- users 1--* goals, 1--* tasks, 1--* calendar_events, 1--* finance_categories, 1--* inbox_items, 1--* ai_plans
+- goals 1--* tasks
+- tasks 1--* subtasks; tasks 1--1? calendar_events (optional link)
+- finance_categories 1--* finance_transactions; budgets reference finance_categories
+Relationships:
+users(id) -> goals.user_id
+users(id) -> tasks.user_id
+users(id) -> calendar_events.user_id
+users(id) -> finance_categories.user_id
+users(id) -> inbox_items.user_id
+users(id) -> ai_plans.user_id
+goals.id -> tasks.goal_id
+tasks.id -> subtasks.task_id
+tasks.id -> calendar_events.task_id (optional)
+finance_categories.id -> finance_transactions.category_id
+finance_categories.id -> budgets.category_id

@@ -1,0 +1,25 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://lifemerge.ai/schemas/planner/v1/goals_min.json",
+    "title": "GoalsMin",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "id",
+            "title"
+        ],
+        "properties": {
+            "id": {
+                "type": "string",
+                "minLength": 1
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+            }
+        }
+    }
+}
