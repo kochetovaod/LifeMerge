@@ -14,9 +14,11 @@ from app.schemas.planner import (
     PlannerDecisionIn,
     PlannerDecisionOut,
     PlannerPlanOut,
+    PlannerReplanIn,
     PlannerRunIn,
     PlannerRunOut,
 )
+from app.services.events import publish_event
 from app.services.planner_service import apply_plan_decision, enqueue_planner_run, get_plan_by_request_id
 
 router = APIRouter(prefix="/planner")
@@ -40,6 +42,12 @@ async def run_ai_planner(
                 error = detail.get("error") or {}
                 details = error.get("details") or {}
                 trial_offer = details.get("trial_offer") or "Start a trial to enable the AI planner."
+            publish_event(
+                name="AI_Planner_Upgrade_Offered",
+                request_id=request.state.request_id,
+                user_id=str(current_user.id),
+                payload={"subscription_status": body.subscription_status, "request_id": body.request_id},
+            )
             payload = {
                 "plan_request_id": None,
                 "status": "upgrade_required",
@@ -55,6 +63,14 @@ async def run_ai_planner(
             )
             return ok(request, payload)
         raise
+
+    if body.subscription_status.lower() == "trial":
+        publish_event(
+            name="AI_Planner_Trial_Used",
+            request_id=request.state.request_id,
+            user_id=str(current_user.id),
+            payload={"request_id": body.request_id},
+        )
 
     await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
 
@@ -102,6 +118,7 @@ async def get_ai_plan(
         "conflicts": plan.get("conflicts", []),
         "version": plan.get("version", 1),
         "request_id": request.state.request_id,
+        "source": plan.get("source", "ai"),
     }
 
     log.info(
@@ -113,6 +130,99 @@ async def get_ai_plan(
         conflicts=len(plan.get("conflicts", [])),
         version=plan.get("version", 1),
     )
+    return ok(request, payload)
+
+
+@router.post("/{plan_request_id}/replan", response_model=PlannerPlanOut)
+async def replan_ai_plan(
+    request: Request,
+    plan_request_id: uuid.UUID,
+    body: PlannerReplanIn,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+):
+    try:
+        ensure_ai_access(request, subscription_status=body.subscription_status)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            trial_offer = None
+            detail = exc.detail or {}
+            if isinstance(detail, dict):
+                error = detail.get("error") or {}
+                details = error.get("details") or {}
+                trial_offer = details.get("trial_offer") or "Start a trial to enable the AI planner."
+            publish_event(
+                name="AI_Planner_Upgrade_Offered",
+                request_id=request.state.request_id,
+                user_id=str(current_user.id),
+                payload={"subscription_status": body.subscription_status, "request_id": body.request_id},
+            )
+            payload = {
+                "plan_request_id": plan_request_id,
+                "status": "upgrade_required",
+                "request_id": request.state.request_id,
+                "message": "AI planner is only available on Trial or Pro.",
+                "trial_offer": trial_offer,
+                "source": None,
+            }
+            return ok(request, payload)
+        raise
+
+    plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=current_user.id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Plan not found"))
+
+    if body.subscription_status.lower() == "trial":
+        publish_event(
+            name="AI_Planner_Trial_Used",
+            request_id=request.state.request_id,
+            user_id=str(current_user.id),
+            payload={"request_id": body.request_id},
+        )
+
+    await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
+
+    planner_payload = {
+        "week_start": body.week_start.isoformat() if body.week_start else None,
+        "work_schedule": [entry.model_dump(mode="json") for entry in body.work_schedule],
+        "subscription_status": body.subscription_status,
+        "tasks": [task.model_dump(mode="json") for task in body.tasks],
+        "calendar_events": [event.model_dump(mode="json") for event in body.calendar_events],
+        "preferences": body.preferences.model_dump(mode="json") if body.preferences else None,
+        "previous_plan_version": plan.get("version", 0),
+        "completed_task_ids": [str(item) for item in body.completed_task_ids],
+        "rescheduled_task_ids": [str(item) for item in body.rescheduled_task_ids],
+        "applied_slot_ids": [str(item) for item in body.applied_slot_ids] or plan.get("applied_slot_ids", []),
+    }
+    await enqueue_planner_run(
+        request=request, user_id=current_user.id, payload=planner_payload, plan_request_id=plan_request_id
+    )
+
+    refreshed_plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=current_user.id)
+    if not refreshed_plan:
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Plan not found"))
+
+    payload = {
+        "plan_request_id": plan_request_id,
+        "status": refreshed_plan["status"],
+        "slots": refreshed_plan["slots"],
+        "conflicts": refreshed_plan.get("conflicts", []),
+        "version": refreshed_plan.get("version", 1),
+        "request_id": request.state.request_id,
+        "source": refreshed_plan.get("source", "ai"),
+    }
+
+    log.info(
+        "planner_plan_replanned",
+        request_id=request.state.request_id,
+        user_id=str(current_user.id),
+        plan_request_id=str(plan_request_id),
+        slots=len(refreshed_plan.get("slots", [])),
+        conflicts=len(refreshed_plan.get("conflicts", [])),
+        version=refreshed_plan.get("version", 1),
+    )
+
     return ok(request, payload)
 
 
@@ -135,6 +245,7 @@ async def decide_ai_plan(
             user_id=current_user.id,
             decision=body.decision,
             accepted_slots=accepted_slots,
+            edits=body.edits,
         )
     except ValueError:
         raise HTTPException(status_code=404, detail=err(request, "not_found", "Plan not found"))

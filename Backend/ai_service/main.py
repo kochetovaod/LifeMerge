@@ -81,6 +81,7 @@ class PlannerTask(BaseModel):
     title: str
     duration_minutes: int = Field(gt=0, le=24 * 60)
     due_at: datetime | None = None
+    priority: int | None = None
     status: Literal["todo", "in_progress", "done", "moved", "skipped"] | None = None
 
 
@@ -145,6 +146,7 @@ class PlannerSlotOut(BaseModel):
 class PlannerPlanOut(BaseModel):
     plan_request_id: uuid.UUID
     status: str = "ready"
+    source: str = "ai"
     slots: list[PlannerSlotOut]
     conflicts: list[PlannerConflict] = Field(default_factory=list)
     version: int = 1
@@ -214,57 +216,197 @@ def _generate_slots(
     rescheduled_task_ids: list[uuid.UUID],
 ) -> tuple[list[PlannerSlotOut], list[PlannerConflict]]:
     start_date = week_start or datetime.now(timezone.utc).date()
-    start_hour = (
-        sorted(work_schedule, key=lambda entry: (entry.day_of_week, entry.start_time))[0].start_time
-        if work_schedule
-        else time(hour=9)
-    )
-    base_dt = datetime.combine(start_date, start_hour, tzinfo=timezone.utc)
-
-    slots: list[PlannerSlotOut] = []
     completed_ids = set(completed_task_ids)
     rescheduled_ids = set(rescheduled_task_ids)
     active_tasks = [task for task in tasks if task.task_id not in completed_ids] if tasks else []
 
-    if not active_tasks:
-        durations = [timedelta(minutes=90), timedelta(minutes=60), timedelta(minutes=45)]
-        titles = ["Deep work", "Focus session", "Wrap-up"]
-        source = list(zip(titles, durations))
-    else:
-        source = [(task.title, timedelta(minutes=task.duration_minutes), task) for task in active_tasks]
-
-    for idx, source_entry in enumerate(source):
-        if len(source_entry) == 3:
-            title, delta, task = source_entry  # type: ignore[misc]
-            task_id = task.task_id
-            description = task.status
-        else:
-            title, delta = source_entry  # type: ignore[misc]
-            task_id = None
-            description = "Suggested block"
-
-        start_at = base_dt + timedelta(hours=idx * 3)
-        end_at = start_at + delta
-        slot = PlannerSlotOut(
-            slot_id=uuid.uuid4(),
-            task_id=task_id,
-            title=title,
-            description=description,
-            start_at=start_at,
-            end_at=end_at,
-        )
-        slots.append(slot)
-
-    conflicts = _detect_conflicts(
-        slots=slots,
+    windows = _build_available_windows(
+        start_date=start_date,
         work_schedule=work_schedule,
         preferences=preferences,
         calendar_events=calendar_events,
-        completed_task_ids=completed_ids,
-        rescheduled_task_ids=rescheduled_ids,
+    )
+    slots: list[PlannerSlotOut] = []
+
+    if not active_tasks:
+        filler_tasks = [
+            PlannerTask(
+                task_id=uuid.uuid4(),
+                title="Deep work",
+                duration_minutes=90,
+                status="todo",
+            ),
+            PlannerTask(
+                task_id=uuid.uuid4(),
+                title="Focus session",
+                duration_minutes=60,
+                status="todo",
+            ),
+            PlannerTask(
+                task_id=uuid.uuid4(),
+                title="Wrap-up",
+                duration_minutes=45,
+                status="todo",
+            ),
+        ]
+        active_tasks = filler_tasks
+
+    scheduled_slots, conflicts = _schedule_tasks(
+        windows=windows,
+        tasks=active_tasks,
+        start_date=start_date,
+    )
+    slots.extend(scheduled_slots)
+
+    conflicts.extend(
+        _detect_conflicts(
+            slots=slots,
+            work_schedule=work_schedule,
+            preferences=preferences,
+            calendar_events=calendar_events,
+            completed_task_ids=completed_ids,
+            rescheduled_task_ids=rescheduled_ids,
+        )
     )
 
     return slots, conflicts
+
+
+def _schedule_tasks(
+    *,
+    windows: list[tuple[datetime, datetime]],
+    tasks: list[PlannerTask],
+    start_date: date,
+) -> tuple[list[PlannerSlotOut], list[PlannerConflict]]:
+    slots: list[PlannerSlotOut] = []
+    conflicts: list[PlannerConflict] = []
+
+    sorted_tasks = sorted(
+        tasks,
+        key=lambda t: (
+            _clean_datetime(t.due_at) if t.due_at else datetime.combine(start_date, time.max, tzinfo=timezone.utc),
+            -(t.priority or 0),
+        ),
+    )
+
+    available_windows = list(windows)
+    for task in sorted_tasks:
+        duration = timedelta(minutes=task.duration_minutes)
+        deadline = _clean_datetime(task.due_at) if task.due_at else datetime.combine(
+            start_date + timedelta(days=7),
+            time(hour=23, minute=59),
+            tzinfo=timezone.utc,
+        )
+
+        placed = False
+        for idx, (win_start, win_end) in enumerate(list(available_windows)):
+            latest_end = min(win_end, deadline)
+            if win_start >= latest_end:
+                continue
+            slot_start = win_start
+            slot_end = slot_start + duration
+            if slot_end > latest_end:
+                continue
+
+            slot = PlannerSlotOut(
+                slot_id=uuid.uuid4(),
+                task_id=task.task_id,
+                title=task.title,
+                description=task.status or "Suggested by AI",
+                start_at=slot_start,
+                end_at=slot_end,
+            )
+            slots.append(slot)
+            placed = True
+
+            remaining = []
+            if slot_end < win_end:
+                remaining.append((slot_end, win_end))
+            available_windows.pop(idx)
+            available_windows[idx:idx] = remaining
+            break
+
+        if not placed:
+            conflicts.append(
+                PlannerConflict(
+                    slot_id=None,
+                    related_task_id=task.task_id,
+                    reason="no_available_window",
+                    severity="error",
+                    details="No free slot before the task deadline.",
+                )
+            )
+
+    return slots, conflicts
+
+
+def _build_available_windows(
+    *,
+    start_date: date,
+    work_schedule: list[WorkScheduleEntry],
+    preferences: PlannerPreferences | None,
+    calendar_events: list[PlannerCalendarEvent],
+) -> list[tuple[datetime, datetime]]:
+    schedule = work_schedule or [
+        WorkScheduleEntry(day_of_week=day, start_time=time(hour=9), end_time=time(hour=17)) for day in range(0, 5)
+    ]
+    events = [
+        (
+            _clean_datetime(event.start_at),
+            _clean_datetime(event.end_at),
+        )
+        for event in calendar_events
+    ]
+
+    windows: list[tuple[datetime, datetime]] = []
+    for day_offset in range(7):
+        if preferences and day_offset in preferences.no_plan_days:
+            continue
+        day_schedule = [entry for entry in schedule if entry.day_of_week == day_offset]
+        for entry in day_schedule:
+            start_dt = datetime.combine(start_date + timedelta(days=day_offset), entry.start_time, tzinfo=timezone.utc)
+            end_dt = datetime.combine(start_date + timedelta(days=day_offset), entry.end_time, tzinfo=timezone.utc)
+            windows.append((start_dt, end_dt))
+
+    if preferences and preferences.breaks:
+        processed: list[tuple[datetime, datetime]] = []
+        for start_dt, end_dt in windows:
+            adjusted = [(start_dt, end_dt)]
+            for br in preferences.breaks:
+                break_start = datetime.combine(start_dt.date(), br.start_time, tzinfo=timezone.utc)
+                break_end = datetime.combine(start_dt.date(), br.end_time, tzinfo=timezone.utc)
+                adjusted = _subtract_interval(adjusted, break_start, break_end)
+            processed.extend(adjusted)
+        windows = processed
+
+    for event_start, event_end in events:
+        windows = _subtract_interval(windows, event_start, event_end)
+
+    windows.sort(key=lambda pair: pair[0])
+    return windows
+
+
+def _subtract_interval(
+    windows: list[tuple[datetime, datetime]], block_start: datetime, block_end: datetime
+) -> list[tuple[datetime, datetime]]:
+    updated: list[tuple[datetime, datetime]] = []
+    for start_dt, end_dt in windows:
+        if block_end <= start_dt or end_dt <= block_start:
+            updated.append((start_dt, end_dt))
+            continue
+        if start_dt < block_start:
+            updated.append((start_dt, block_start))
+        if block_end < end_dt:
+            updated.append((block_end, end_dt))
+    return updated
+
+
+def _clean_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _detect_conflicts(
