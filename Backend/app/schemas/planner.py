@@ -53,6 +53,7 @@ class PlannerTaskIn(BaseModel):
     title: str
     duration_minutes: int = Field(gt=0, le=24 * 60)
     due_at: datetime | None = None
+    priority: int | None = None
     status: Literal["todo", "in_progress", "done", "moved", "skipped"] | None = None
 
 
@@ -85,12 +86,17 @@ class PlannerRunIn(BaseModel):
     applied_slot_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
+class PlannerReplanIn(PlannerRunIn):
+    """Allows re-running the planner for an existing request."""
+
+
 class PlannerRunOut(BaseModel):
     plan_request_id: uuid.UUID | None
     status: str
     request_id: str
     message: str | None = None
     trial_offer: str | None = None
+    source: str | None = None
 
 
 class PlannerSlot(BaseModel):
@@ -118,15 +124,25 @@ class PlannerPlanOut(BaseModel):
     plan_request_id: uuid.UUID
     status: str
     version: int = 1
+    source: str = "ai"
     slots: list[PlannerSlot]
     conflicts: list[PlannerConflict] = Field(default_factory=list)
     request_id: str
+
+
+class PlannerSlotEdit(BaseModel):
+    slot_id: uuid.UUID
+    title: str | None = None
+    description: str | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
 
 
 class PlannerDecisionIn(BaseModel):
     request_id: str = Field(min_length=1, max_length=128)
     decision: Literal["accept", "decline"]
     accepted_slot_ids: list[uuid.UUID] | None = None
+    edits: list[PlannerSlotEdit] = Field(default_factory=list)
 
 
 class PlannerDecisionOut(BaseModel):

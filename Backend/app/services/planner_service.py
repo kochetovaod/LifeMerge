@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import log
 from app.repositories import tasks_repo
-from app.schemas.planner import PlannerConflict, PlannerPreferences, PlannerSlot
+from app.schemas.planner import (
+    PlannerConflict,
+    PlannerPreferences,
+    PlannerSlot,
+    PlannerSlotEdit,
+    PlannerTaskIn,
+)
 from app.services.events import publish_event
 from app.services.tasks_service import create_task, update_task
 
@@ -19,9 +25,10 @@ _GENERATED_PLANS: dict[uuid.UUID, dict[str, Any]] = {}
 
 
 async def enqueue_planner_run(
-    *, request: Request, user_id: uuid.UUID, payload: dict[str, Any]
+    *, request: Request, user_id: uuid.UUID, payload: dict[str, Any], plan_request_id: uuid.UUID | None = None
 ) -> dict[str, Any]:
-    plan_request_id = uuid.uuid4()
+    plan_request_id = plan_request_id or uuid.uuid4()
+    existing_plan = _GENERATED_PLANS.get(plan_request_id)
 
     publish_event(
         name="AI_Planner_Requested",
@@ -34,23 +41,20 @@ async def enqueue_planner_run(
     slots = plan["slots"]
     conflicts: list[PlannerConflict] = plan.get("conflicts", [])
     version: int = plan.get("version", 1)
-    _GENERATED_PLANS[plan_request_id] = {
+    source = plan.get("source", "ai")
+    new_plan = {
         "user_id": user_id,
         "status": plan["status"],
         "slots": slots,
         "conflicts": conflicts,
         "version": version,
-        "created_at": datetime.now(timezone.utc),
-        "history": [
-            {
-                "version": version,
-                "status": plan["status"],
-                "slots": slots,
-                "conflicts": conflicts,
-                "logged_at": datetime.now(timezone.utc),
-            }
-        ],
+        "created_at": existing_plan.get("created_at") if existing_plan else datetime.now(timezone.utc),
+        "applied_slot_ids": payload.get("applied_slot_ids", []),
+        "history": list(existing_plan.get("history", [])) if existing_plan else [],
+        "source": source,
     }
+    _append_history(new_plan, status=plan["status"])
+    _GENERATED_PLANS[plan_request_id] = new_plan
 
     log.info(
         "ai_planner_requested",
@@ -62,12 +66,13 @@ async def enqueue_planner_run(
         conflicts=len(conflicts),
     )
 
-    return {"plan_request_id": plan_request_id, "status": "ready"}
+    return {"plan_request_id": plan_request_id, "status": "ready", "source": source}
 
 
 def _generate_slots(
     *,
     week_start: str | None,
+    tasks: list[dict[str, Any]] | None = None,
     work_schedule: list[dict[str, Any]] | None = None,
     preferences: PlannerPreferences | None = None,
     calendar_events: list[dict[str, Any]] | None = None,
@@ -87,47 +92,248 @@ def _generate_slots(
     else:
         start_date = datetime.now(timezone.utc).date()
 
-    start_time = time(hour=9)
-    if work_schedule:
-        start_key = lambda entry: entry.get("start_time").isoformat() if isinstance(entry.get("start_time"), time) else str(entry.get("start_time"))  # noqa: E731
-        first_entry = sorted(work_schedule, key=start_key)[0]
-        raw_start = first_entry.get("start_time")
-        if isinstance(raw_start, time):
-            start_time = raw_start
-        elif isinstance(raw_start, str):
-            try:
-                start_time = time.fromisoformat(raw_start)
-            except ValueError:
-                start_time = time(hour=9)
+    completed_ids = set(completed_task_ids or [])
+    rescheduled_ids = set(rescheduled_task_ids or [])
+    parsed_tasks: list[PlannerTaskIn] = []
+    for raw in tasks or []:
+        try:
+            parsed_tasks.append(PlannerTaskIn.model_validate(raw))
+        except Exception:  # noqa: BLE001
+            continue
+    active_tasks = [task for task in parsed_tasks if str(task.task_id) not in completed_ids]
 
-    base_dt = datetime.combine(start_date, start_time, tzinfo=timezone.utc)
-    slots: list[PlannerSlot] = []
-    durations = [timedelta(minutes=90), timedelta(minutes=60), timedelta(minutes=45)]
-    titles = ["Deep work", "Focus session", "Wrap-up"]
-
-    for idx, delta in enumerate(durations):
-        start_at = base_dt + timedelta(hours=idx * 3)
-        end_at = start_at + delta
-        slot = PlannerSlot(
-            slot_id=uuid.uuid4(),
-            task_id=None,
-            title=titles[idx],
-            description=f"Suggested block {idx + 1}",
-            start_at=start_at,
-            end_at=end_at,
-        )
-        slots.append(slot)
-
-    conflicts = _detect_conflicts(
-        slots=slots,
+    windows = _build_available_windows(
+        start_date=start_date,
         work_schedule=work_schedule or [],
         preferences=preferences,
         calendar_events=calendar_events or [],
-        completed_task_ids=completed_task_ids or [],
-        rescheduled_task_ids=rescheduled_task_ids or [],
+    )
+    slots: list[PlannerSlot] = []
+
+    if not active_tasks:
+        filler_tasks = [
+            PlannerTaskIn(
+                task_id=uuid.uuid4(),
+                title="Deep work",
+                duration_minutes=90,
+                status="todo",
+            ),
+            PlannerTaskIn(
+                task_id=uuid.uuid4(),
+                title="Focus session",
+                duration_minutes=60,
+                status="todo",
+            ),
+            PlannerTaskIn(
+                task_id=uuid.uuid4(),
+                title="Wrap-up",
+                duration_minutes=45,
+                status="todo",
+            ),
+        ]
+        active_tasks = filler_tasks
+
+    scheduled_slots, conflicts = _schedule_tasks(
+        windows=windows,
+        tasks=active_tasks,
+        start_date=start_date,
+    )
+    slots.extend(scheduled_slots)
+
+    conflicts.extend(
+        _detect_conflicts(
+            slots=slots,
+            work_schedule=work_schedule or [],
+            preferences=preferences,
+            calendar_events=calendar_events or [],
+            completed_task_ids=list(completed_ids),
+            rescheduled_task_ids=list(rescheduled_ids),
+        )
     )
 
     return slots, conflicts
+
+
+def _schedule_tasks(
+    *, windows: list[tuple[datetime, datetime]], tasks: list[PlannerTaskIn], start_date: date
+) -> tuple[list[PlannerSlot], list[PlannerConflict]]:
+    slots: list[PlannerSlot] = []
+    conflicts: list[PlannerConflict] = []
+
+    sorted_tasks = sorted(
+        tasks,
+        key=lambda t: (
+            _clean_datetime(t.due_at) if t.due_at else datetime.combine(start_date, time.max, tzinfo=timezone.utc),
+            -(t.priority or 0),
+        ),
+    )
+
+    available_windows = list(windows)
+    for task in sorted_tasks:
+        duration = timedelta(minutes=task.duration_minutes)
+        deadline = _clean_datetime(task.due_at) if task.due_at else datetime.combine(
+            start_date + timedelta(days=7),
+            time(hour=23, minute=59),
+            tzinfo=timezone.utc,
+        )
+
+        placed = False
+        for idx, (win_start, win_end) in enumerate(list(available_windows)):
+            latest_end = min(win_end, deadline)
+            if win_start >= latest_end:
+                continue
+            slot_start = win_start
+            slot_end = slot_start + duration
+            if slot_end > latest_end:
+                continue
+
+            slots.append(
+                PlannerSlot(
+                    slot_id=uuid.uuid4(),
+                    task_id=task.task_id,
+                    title=task.title,
+                    description=task.status or "Suggested by AI",
+                    start_at=slot_start,
+                    end_at=slot_end,
+                )
+            )
+            placed = True
+
+            remaining = []
+            if slot_end < win_end:
+                remaining.append((slot_end, win_end))
+            available_windows.pop(idx)
+            available_windows[idx:idx] = remaining
+            break
+
+        if not placed:
+            conflicts.append(
+                PlannerConflict(
+                    slot_id=None,
+                    related_task_id=task.task_id,
+                    reason="no_available_window",
+                    severity="error",
+                    details="No free slot before the task deadline.",
+                )
+            )
+
+    return slots, conflicts
+
+
+def _build_available_windows(
+    *,
+    start_date: date,
+    work_schedule: list[dict[str, Any]],
+    preferences: PlannerPreferences | None,
+    calendar_events: list[dict[str, Any]],
+) -> list[tuple[datetime, datetime]]:
+    schedule = work_schedule or [
+        {"day_of_week": day, "start_time": time(hour=9), "end_time": time(hour=17)} for day in range(0, 5)
+    ]
+    events = []
+    for event in calendar_events:
+        start = event.get("start_at")
+        end = event.get("end_at")
+        if isinstance(start, str):
+            start = datetime.fromisoformat(start)
+        if isinstance(end, str):
+            end = datetime.fromisoformat(end)
+        if start and end:
+            events.append((_clean_datetime(start), _clean_datetime(end)))
+
+    windows: list[tuple[datetime, datetime]] = []
+    for day_offset in range(7):
+        if preferences and day_offset in preferences.no_plan_days:
+            continue
+        day_schedule = [entry for entry in schedule if entry.get("day_of_week") == day_offset]
+        for entry in day_schedule:
+            start_time = entry.get("start_time")
+            end_time = entry.get("end_time")
+            if isinstance(start_time, str):
+                start_time = time.fromisoformat(start_time)
+            if isinstance(end_time, str):
+                end_time = time.fromisoformat(end_time)
+            if not start_time or not end_time:
+                continue
+            start_dt = datetime.combine(start_date + timedelta(days=day_offset), start_time, tzinfo=timezone.utc)
+            end_dt = datetime.combine(start_date + timedelta(days=day_offset), end_time, tzinfo=timezone.utc)
+            windows.append((start_dt, end_dt))
+
+    if preferences and preferences.breaks:
+        processed: list[tuple[datetime, datetime]] = []
+        for start_dt, end_dt in windows:
+            adjusted = [(start_dt, end_dt)]
+            for br in preferences.breaks:
+                break_start = datetime.combine(start_dt.date(), br.start_time, tzinfo=timezone.utc)
+                break_end = datetime.combine(start_dt.date(), br.end_time, tzinfo=timezone.utc)
+                adjusted = _subtract_interval(adjusted, break_start, break_end)
+            processed.extend(adjusted)
+        windows = processed
+
+    for event_start, event_end in events:
+        windows = _subtract_interval(windows, event_start, event_end)
+
+    windows.sort(key=lambda pair: pair[0])
+    return windows
+
+
+def _subtract_interval(
+    windows: list[tuple[datetime, datetime]], block_start: datetime, block_end: datetime
+) -> list[tuple[datetime, datetime]]:
+    updated: list[tuple[datetime, datetime]] = []
+    for start_dt, end_dt in windows:
+        if block_end <= start_dt or end_dt <= block_start:
+            updated.append((start_dt, end_dt))
+            continue
+        if start_dt < block_start:
+            updated.append((start_dt, block_start))
+        if block_end < end_dt:
+            updated.append((block_end, end_dt))
+    return updated
+
+
+def _clean_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _apply_slot_edits(slots: list[PlannerSlot], edits: list[PlannerSlotEdit]) -> list[PlannerSlot]:
+    edits_map = {item.slot_id: item for item in edits}
+    updated: list[PlannerSlot] = []
+
+    for slot in slots:
+        edit = edits_map.get(slot.slot_id)
+        if not edit:
+            updated.append(slot)
+            continue
+
+        start_at = edit.start_at or slot.start_at
+        end_at = edit.end_at or slot.end_at
+        if end_at <= start_at:
+            log.warning(
+                "planner_edit_invalid_range",
+                slot_id=str(slot.slot_id),
+                request_start=start_at.isoformat(),
+                request_end=end_at.isoformat(),
+            )
+            updated.append(slot)
+            continue
+
+        updated.append(
+            PlannerSlot(
+                slot_id=slot.slot_id,
+                task_id=slot.task_id,
+                title=edit.title or slot.title,
+                description=edit.description or slot.description,
+                start_at=start_at,
+                end_at=end_at,
+            )
+        )
+
+    return updated
 
 
 def get_plan_by_request_id(*, plan_request_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any] | None:
@@ -144,6 +350,7 @@ async def apply_plan_decision(
     user_id: uuid.UUID,
     decision: str,
     accepted_slots: set[uuid.UUID] | None,
+    edits: list[PlannerSlotEdit] | None = None,
 ) -> dict[str, Any]:
     plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=user_id)
     if not plan:
@@ -166,6 +373,9 @@ async def apply_plan_decision(
     created: list[uuid.UUID] = []
     updated: list[uuid.UUID] = []
     slots: list[PlannerSlot] = plan["slots"]
+    if edits:
+        slots = _apply_slot_edits(slots, edits)
+        plan["slots"] = slots
 
     to_accept = accepted_slots if accepted_slots else {slot.slot_id for slot in slots}
 
@@ -253,13 +463,20 @@ async def _request_plan_from_ai(
         # Fall back to local generation to avoid user-facing failures
         fallback_slots, fallback_conflicts = _generate_slots(
             week_start=payload.get("week_start"),
+            tasks=payload.get("tasks", []),
             work_schedule=payload.get("work_schedule", []),
             preferences=payload.get("preferences"),
             calendar_events=payload.get("calendar_events", []),
             completed_task_ids=payload.get("completed_task_ids", []),
             rescheduled_task_ids=payload.get("rescheduled_task_ids", []),
         )
-        return {"status": "ready", "slots": fallback_slots, "conflicts": fallback_conflicts, "version": previous_version + 1}
+        return {
+            "status": "ready",
+            "slots": fallback_slots,
+            "conflicts": fallback_conflicts,
+            "version": previous_version + 1,
+            "source": "ai",
+        }
 
     plans = result.get("plans") or []
     plan_data = next((p for p in plans if str(p.get("plan_request_id")) == str(plan_request_id)), None)
@@ -272,13 +489,20 @@ async def _request_plan_from_ai(
         )
         fallback_slots, fallback_conflicts = _generate_slots(
             week_start=payload.get("week_start"),
+            tasks=payload.get("tasks", []),
             work_schedule=payload.get("work_schedule", []),
             preferences=payload.get("preferences"),
             calendar_events=payload.get("calendar_events", []),
             completed_task_ids=payload.get("completed_task_ids", []),
             rescheduled_task_ids=payload.get("rescheduled_task_ids", []),
         )
-        return {"status": "ready", "slots": fallback_slots, "conflicts": fallback_conflicts, "version": previous_version + 1}
+        return {
+            "status": "ready",
+            "slots": fallback_slots,
+            "conflicts": fallback_conflicts,
+            "version": previous_version + 1,
+            "source": "ai",
+        }
 
     slots: list[PlannerSlot] = []
     conflicts: list[PlannerConflict] = []
@@ -310,6 +534,7 @@ async def _request_plan_from_ai(
     if not slots:
         slots, conflicts = _generate_slots(
             week_start=payload.get("week_start"),
+            tasks=payload.get("tasks", []),
             work_schedule=payload.get("work_schedule", []),
             preferences=payload.get("preferences"),
             calendar_events=payload.get("calendar_events", []),
@@ -322,6 +547,7 @@ async def _request_plan_from_ai(
         "slots": slots,
         "conflicts": conflicts,
         "version": plan_data.get("version") or previous_version + 1,
+        "source": plan_data.get("source", "ai"),
     }
 
 
