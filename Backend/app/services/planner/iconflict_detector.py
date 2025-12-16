@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.schemas.planner import PlannerConflict, PlannerPreferences, PlannerSlot
+from app.domain.value_objects.planner import PlannerConflict, PlannerPreferences, PlannerSlot
 
 
 class IConflictDetector(Protocol):
