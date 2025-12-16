@@ -15,6 +15,58 @@ from app.middleware.request_context import RequestContextMiddleware
 
 configure_logging()
 
+# Проверка безопасности секретов при старте
+def validate_security_config() -> None:
+    """Проверяем конфигурацию безопасности при запуске приложения."""
+    insecure_defaults = settings.INSECURE_DEFAULT_VALUES
+    
+    # В dev-окружении только логируем предупреждения
+    if settings.APP_ENV == "dev":
+        if settings.JWT_SECRET_KEY in insecure_defaults:
+            log.warning(
+                "INSECURE_CONFIGURATION",
+                field="JWT_SECRET_KEY",
+                value=settings.JWT_SECRET_KEY,
+                message="Using default JWT secret key in dev environment. This is INSECURE for production!"
+            )
+        
+        if settings.FCM_SERVER_KEY in insecure_defaults:
+            log.warning(
+                "INSECURE_CONFIGURATION",
+                field="FCM_SERVER_KEY",
+                value=settings.FCM_SERVER_KEY,
+                message="Using default FCM key in dev environment. This is INSECURE for production!"
+            )
+        
+        if settings.AI_SERVICE_AUTH_TOKEN in insecure_defaults:
+            log.warning(
+                "INSECURE_CONFIGURATION",
+                field="AI_SERVICE_AUTH_TOKEN",
+                value=settings.AI_SERVICE_AUTH_TOKEN,
+                message="Using default AI service token in dev environment. This is INSECURE for production!"
+            )
+    
+    # В stage/prod окружениях валидация уже выполнена в Settings через field_validator
+    # Но дополнительно логируем факт использования безопасных значений
+    else:
+        log.info(
+            "SECURITY_CONFIG_VALIDATED",
+            env=settings.APP_ENV,
+            jwt_secret_set=settings.JWT_SECRET_KEY not in insecure_defaults,
+            fcm_key_set=settings.FCM_SERVER_KEY not in insecure_defaults,
+            ai_token_set=settings.AI_SERVICE_AUTH_TOKEN not in insecure_defaults,
+        )
+    
+    # Логируем CORS конфигурацию
+    log.info(
+        "CORS_CONFIGURATION",
+        env=settings.APP_ENV,
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_origins=settings.CORS_ALLOW_ORIGINS,
+        origins_count=len(settings.CORS_ALLOW_ORIGINS),
+        using_wildcard="*" in settings.CORS_ALLOW_ORIGINS,
+    )
+
 app = FastAPI(
     title="LifeMerge Backend (Skeleton)",
     version="0.1.0",
@@ -23,13 +75,32 @@ app = FastAPI(
     redoc_url=f"{settings.API_V1_PREFIX}/redoc",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ALLOW_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Выполняем проверку безопасности
+validate_security_config()
+
+# Настройка CORS middleware
+cors_kwargs = {
+    "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+    "expose_headers": ["X-Request-Id", "X-Timezone"],
+}
+
+# Добавляем allow_origins только если есть origins для разрешения
+if settings.CORS_ALLOW_ORIGINS:
+    cors_kwargs["allow_origins"] = settings.CORS_ALLOW_ORIGINS
+else:
+    # Если origins пустые, но нужны credentials - это конфигурационная ошибка
+    # (кроме dev окружения, где есть дефолты)
+    if settings.CORS_ALLOW_CREDENTIALS and settings.APP_ENV != "dev":
+        raise ValueError(
+            "CORS_ALLOW_ORIGINS must be configured when CORS_ALLOW_CREDENTIALS=True "
+            f"in {settings.APP_ENV} environment."
+        )
+    # В dev режиме или без credentials можем оставить origins пустыми
+    # FastAPI CORSMiddleware будет использовать null origin
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Adds request_id + timezone context, returns request_id in all responses
 app.add_middleware(RequestContextMiddleware)

@@ -171,7 +171,7 @@ def connect(
     timeout: float = 5.0,
     detect_types: int = 0,
     isolation_level: Optional[str] = None,
-    check_same_thread: bool = True,
+    check_same_thread: bool = False,
     factory: type[sqlite3.Connection] | None = None,
     cached_statements: int = 128,
     uri: bool = False,
@@ -192,5 +192,8 @@ def connect(
     )
     if factory is None:
         connect_kwargs.pop("factory")
+    connection = sqlite3.connect(**connect_kwargs)
+    # This fallback uses run_in_executor -> DB work can happen in a different thread.
+    connect_kwargs["check_same_thread"] = False
     connection = sqlite3.connect(**connect_kwargs)
     return Connection(connection, loop)

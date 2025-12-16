@@ -1,0 +1,13 @@
+diff --git a/Backend/aiosqlite/__init__.py b/Backend/aiosqlite/__init__.py
+index abc1234..def5678 100644
+--- a/Backend/aiosqlite/__init__.py
++++ b/Backend/aiosqlite/__init__.py
+@@ -XX,XX +XX,XX @@ def connect(
+-    check_same_thread: bool = True,
++    check_same_thread: bool = False,
+@@ -XX,XX +XX,XX @@ def connect(
+     connection = sqlite3.connect(**connect_kwargs)
++    # This fallback uses run_in_executor -> DB work can happen in a different thread.
++    connect_kwargs["check_same_thread"] = False
++    connection = sqlite3.connect(**connect_kwargs)
+     return Connection(connection, loop)

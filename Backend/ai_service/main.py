@@ -360,12 +360,14 @@ def _build_available_windows(
 
     windows: list[tuple[datetime, datetime]] = []
     for day_offset in range(7):
-        if preferences and day_offset in preferences.no_plan_days:
+        current_date = start_date + timedelta(days=day_offset)
+        weekday = current_date.weekday()  # 0=Mon ... 6=Sun
+        if preferences and weekday in preferences.no_plan_days:
             continue
-        day_schedule = [entry for entry in schedule if entry.day_of_week == day_offset]
+        day_schedule = [entry for entry in schedule if entry.day_of_week == weekday]
         for entry in day_schedule:
-            start_dt = datetime.combine(start_date + timedelta(days=day_offset), entry.start_time, tzinfo=timezone.utc)
-            end_dt = datetime.combine(start_date + timedelta(days=day_offset), entry.end_time, tzinfo=timezone.utc)
+            start_dt = datetime.combine(current_date, entry.start_time, tzinfo=timezone.utc)
+            end_dt = datetime.combine(current_date, entry.end_time, tzinfo=timezone.utc)
             windows.append((start_dt, end_dt))
 
     if preferences and preferences.breaks:
@@ -464,7 +466,7 @@ def _detect_conflicts(
                     )
                 )
             for br in preferences.breaks:
-                if br.start_time <= start_time < br.end_time or br.start_time < end_time <= br.end_time:
+                if start_time < br.end_time and end_time > br.start_time:
                     conflicts.append(
                         PlannerConflict(
                             slot_id=slot.slot_id,
@@ -475,7 +477,9 @@ def _detect_conflicts(
                     )
 
         for event in calendar_events:
-            if event.start_at < slot.end_at and slot.start_at < event.end_at:
+                        event_start = _clean_datetime(event.start_at)
+            event_end = _clean_datetime(event.end_at)
+            if event_start < slot.end_at and slot.start_at < event_end:
                 conflicts.append(
                     PlannerConflict(
                         slot_id=slot.slot_id,

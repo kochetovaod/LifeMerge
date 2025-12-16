@@ -1,0 +1,16 @@
+diff --git a/Backend/ai_service/main.py b/Backend/ai_service/main.py
+index abc1234..def5678 100644
+--- a/Backend/ai_service/main.py
++++ b/Backend/ai_service/main.py
+@@ -XX,XX +XX,XX @@ def _detect_conflicts(
+             for br in preferences.breaks:
+-                if br.start_time <= start_time < br.end_time or br.start_time < end_time <= br.end_time:
++                if start_time < br.end_time and end_time > br.start_time:
+                     conflicts.append(
+                         PlannerConflict(
+                             slot_id=slot.slot_id,
+                             reason="break_time",
+                             severity="warning",
+                             details="Overlaps with a planned break.",
+                         )
+                     )
