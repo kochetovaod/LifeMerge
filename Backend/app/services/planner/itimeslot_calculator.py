@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from app.schemas.planner import PlannerPreferences
+from app.domain.value_objects.planner import PlannerPreferences
 
 
 class ITimeSlotCalculator(Protocol):

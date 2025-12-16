@@ -10,6 +10,7 @@ from app.api.ai_access import ensure_ai_access
 from app.api.idempotency import enforce_idempotency
 from app.core.logging import log
 from app.core.response import err
+from app.infrastructure.mappers.planner_mapper import domain_conflict_to_dto, domain_slot_to_dto
 from app.schemas.planner import (
     PlannerDecisionIn,
     PlannerReplanIn,
@@ -201,11 +202,13 @@ class PlannerOrchestrator:
     def get_plan(self, request: Request, plan_request_id: uuid.UUID, current_user) -> dict:
         plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=current_user.id)
         validated_plan = self.payload_validator.ensure_plan_exists(plan, request)
+        mapped_slots = [domain_slot_to_dto(slot) for slot in validated_plan.get("slots", [])]
+        mapped_conflicts = [domain_conflict_to_dto(item) for item in validated_plan.get("conflicts", [])]
         payload = {
             "plan_request_id": plan_request_id,
             "status": validated_plan["status"],
-            "slots": validated_plan["slots"],
-            "conflicts": validated_plan.get("conflicts", []),
+            "slots": mapped_slots,
+            "conflicts": mapped_conflicts,
             "version": validated_plan.get("version", 1),
             "request_id": request.state.request_id,
             "source": validated_plan.get("source", "ai"),
@@ -261,11 +264,15 @@ class PlannerOrchestrator:
         )
         refreshed_plan = get_plan_by_request_id(plan_request_id=plan_request_id, user_id=current_user.id)
         validated_refreshed_plan = self.payload_validator.ensure_plan_exists(refreshed_plan, request)
+        mapped_slots = [domain_slot_to_dto(slot) for slot in validated_refreshed_plan.get("slots", [])]
+        mapped_conflicts = [
+            domain_conflict_to_dto(item) for item in validated_refreshed_plan.get("conflicts", [])
+        ]
         payload = {
             "plan_request_id": plan_request_id,
             "status": validated_refreshed_plan["status"],
-            "slots": validated_refreshed_plan["slots"],
-            "conflicts": validated_refreshed_plan.get("conflicts", []),
+            "slots": mapped_slots,
+            "conflicts": mapped_conflicts,
             "version": validated_refreshed_plan.get("version", 1),
             "request_id": request.state.request_id,
             "source": validated_refreshed_plan.get("source", "ai"),

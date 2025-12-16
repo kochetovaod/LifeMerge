@@ -9,13 +9,8 @@ from fastapi import Request
 
 from app.core.config import settings
 from app.core.logging import log
-from app.schemas.planner import (
-    PlannerConflict,
-    PlannerPreferences,
-    PlannerSlot,
-    PlannerSlotEdit,
-    PlannerTaskIn,
-)
+from app.domain.value_objects.planner import PlannerConflict, PlannerPreferences, PlannerSlot
+from app.schemas.planner import PlannerSlotEdit, PlannerTaskIn
 from app.services.observability import log_ai_request
 from app.services.planner.iaiorchestrator import IAIOrchestrator
 from app.services.planner.iconflict_detector import IConflictDetector
@@ -306,7 +301,7 @@ class SlotGenerator(ISlotGenerator):
     ) -> tuple[list[PlannerSlot], list[PlannerConflict]]:
         if preferences and isinstance(preferences, dict):
             try:
-                preferences = PlannerPreferences.model_validate(preferences)
+                preferences = PlannerPreferences.from_dict(preferences)
             except Exception:  # noqa: BLE001
                 preferences = None
         if week_start:
@@ -572,8 +567,7 @@ class AIOrchestrator(IAIOrchestrator):
         conflicts: list[PlannerConflict] = []
         for slot_data in plan_data.get("slots", []):
             try:
-                slot = PlannerSlot.model_validate(slot_data)
-                slots.append(slot)
+                slots.append(PlannerSlot.from_dict(slot_data))
             except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "ai_planner_slot_invalid",
@@ -584,7 +578,7 @@ class AIOrchestrator(IAIOrchestrator):
 
         for conflict_data in plan_data.get("conflicts", []):
             try:
-                conflicts.append(PlannerConflict.model_validate(conflict_data))
+                conflicts.append(PlannerConflict.from_dict(conflict_data))
             except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "ai_planner_conflict_invalid",

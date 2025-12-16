@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol, Tuple
 
-from app.schemas.planner import PlannerConflict, PlannerPreferences, PlannerSlot, PlannerSlotEdit
+from app.domain.value_objects.planner import PlannerConflict, PlannerPreferences, PlannerSlot
+from app.schemas.planner import PlannerSlotEdit
 
 
 class ISlotGenerator(Protocol):
