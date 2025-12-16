@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # Batch planner tuning
     AI_PLANNER_MAX_BATCH: int = 50
+    PLANNER_DEFAULT_STRATEGY: str = "simple_greedy"
 
     # Subscriptions
     TRIAL_PERIOD_DAYS: int = 14

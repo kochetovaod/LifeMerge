@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, FieldValidationInfo, field_validator
 
@@ -84,6 +84,8 @@ class PlannerRunIn(BaseModel):
     completed_task_ids: list[uuid.UUID] = Field(default_factory=list)
     rescheduled_task_ids: list[uuid.UUID] = Field(default_factory=list)
     applied_slot_ids: list[uuid.UUID] = Field(default_factory=list)
+    strategy: str | None = None
+    strategy_options: dict[str, Any] | None = None
 
 
 class PlannerReplanIn(PlannerRunIn):

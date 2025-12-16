@@ -85,6 +85,8 @@ async def run_ai_planner(
         "completed_task_ids": [str(item) for item in body.completed_task_ids],
         "rescheduled_task_ids": [str(item) for item in body.rescheduled_task_ids],
         "applied_slot_ids": [str(item) for item in body.applied_slot_ids],
+        "strategy": body.strategy,
+        "strategy_options": body.strategy_options,
     }
     result = await enqueue_planner_run(request=request, user_id=current_user.id, payload=planner_payload)
 
@@ -194,6 +196,8 @@ async def replan_ai_plan(
         "completed_task_ids": [str(item) for item in body.completed_task_ids],
         "rescheduled_task_ids": [str(item) for item in body.rescheduled_task_ids],
         "applied_slot_ids": [str(item) for item in body.applied_slot_ids] or plan.get("applied_slot_ids", []),
+        "strategy": body.strategy,
+        "strategy_options": body.strategy_options,
     }
     await enqueue_planner_run(
         request=request, user_id=current_user.id, payload=planner_payload, plan_request_id=plan_request_id
