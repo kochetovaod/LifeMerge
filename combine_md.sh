@@ -26,7 +26,7 @@ include_globs=(
 exclude_dirs=(
   ".git" ".dart_tool" "build" ".idea"
   ".vscode" "node_modules" "dist" "target"
-  ".gradle" ".next" ".cache"
+  ".gradle" ".next" ".cache" "Docs" "Flutter"
 )
 
 # Собираем выражение prune для директорий

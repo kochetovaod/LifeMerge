@@ -16,7 +16,7 @@ from app.models.notification import DigestSchedule, NotificationTrigger  # noqa:
 from app.models.sync_operation import SyncOperation  # noqa: F401
 from app.models.ai_plan import AiPlanRun  # noqa: F401
 from app.models.subscription_state import SubscriptionState  # noqa: F401
-
+from app.infrastructure.models.planner_models import SQLPlannerPlan, SQLPlannerSlot, SQLPlannerConflict
 
 async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
