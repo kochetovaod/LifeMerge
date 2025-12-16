@@ -7,8 +7,9 @@ from typing import Any
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.task_service import TaskService
 from app.core.logging import log
-from app.repositories import tasks_repo
+from app.infrastructure.di import create_task_service
 from app.schemas.planner import PlannerSlotEdit
 from app.services.events import publish_event
 from app.services.planner.components import (
@@ -23,7 +24,6 @@ from app.services.planner.iconflict_detector import IConflictDetector
 from app.services.planner.iplan_history_manager import IPlanHistoryManager
 from app.services.planner.islot_generator import ISlotGenerator
 from app.services.planner.itimeslot_calculator import ITimeSlotCalculator
-from app.services.tasks_service import create_task, update_task
 
 _GENERATED_PLANS: dict[uuid.UUID, dict[str, Any]] = {}
 
@@ -112,10 +112,13 @@ class PlannerService:
         decision: str,
         accepted_slots: set[uuid.UUID] | None,
         edits: list[PlannerSlotEdit] | None = None,
+        task_service: TaskService | None = None,
     ) -> dict[str, Any]:
         plan = self.get_plan_by_request_id(plan_request_id=plan_request_id, user_id=user_id)
         if not plan:
             raise ValueError("plan_not_found")
+
+        task_service = task_service or create_task_service(db)
 
         if plan["status"] in {"accepted", "declined"}:
             return {
@@ -151,7 +154,7 @@ class PlannerService:
 
             duration_minutes = self.time_slot_calculator.calculate_duration(slot.start_at, slot.end_at)
             if slot.task_id:
-                task = await tasks_repo.get_by_id(db, task_id=slot.task_id, user_id=user_id)
+                task = await task_service.get_task(slot.task_id, user_id)
                 if not task:
                     continue
                 patch = {
@@ -161,7 +164,7 @@ class PlannerService:
                     "estimated_minutes": duration_minutes,
                     "status": "todo",
                 }
-                updated_task = await update_task(db, task, patch, expected_updated_at=None)
+                updated_task = await task_service.update_task(task, patch, expected_updated_at=None)
                 updated.append(updated_task.id)
             else:
                 task_data = {
@@ -170,7 +173,7 @@ class PlannerService:
                     "due_at": slot.start_at,
                     "estimated_minutes": duration_minutes,
                 }
-                new_task = await create_task(db, user_id, task_data)
+                new_task = await task_service.create_task(user_id, task_data)
                 created.append(new_task.id)
 
         accepted_all = len(to_accept) == len(slots)

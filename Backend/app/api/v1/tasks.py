@@ -4,18 +4,16 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.application.services.task_service import TaskService
 from app.api.idempotency import enforce_idempotency
 from app.core.logging import log
 from app.core.response import err, ok
 from app.db.session import get_db
-from app.models.task import Task
 from app.schemas.tasks import ALLOWED_STATUSES, TaskCreateIn, TaskDeleteIn, TaskListOut, TaskOut, TaskUpdateIn
 from app.services.events import publish_event
-from app.services.tasks_service import create_task, list_tasks, soft_delete_task, update_task
+from app.infrastructure.di import get_task_service
 
 router = APIRouter(prefix="/tasks")
 
@@ -24,7 +22,7 @@ router = APIRouter(prefix="/tasks")
 async def get_tasks(
     request: Request,
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    task_service: TaskService = Depends(get_task_service),
     status: str | None = Query(default=None),
     goal_id: uuid.UUID | None = Query(default=None),
     due_from: datetime | None = Query(default=None),
@@ -35,9 +33,8 @@ async def get_tasks(
     if status and status not in ALLOWED_STATUSES:
         raise HTTPException(status_code=400, detail=err(request, "validation_error", "Unsupported status filter"))
 
-    items, next_cursor = await list_tasks(
-        db,
-        user_id=current_user.id,
+    items, next_cursor = await task_service.list_tasks(
+        current_user.id,
         status=status,
         goal_id=goal_id,
         due_from=due_from,
@@ -67,14 +64,14 @@ async def post_task(
     request: Request,
     body: TaskCreateIn,
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db=Depends(get_db),
+    task_service: TaskService = Depends(get_task_service),
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
     await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
 
-    task = await create_task(db, current_user.id, body.model_dump())
+    task = await task_service.create_task(current_user.id, body.model_dump())
     await db.commit()
-    await db.refresh(task)
 
     publish_event(
         name="Task_Created",
@@ -99,18 +96,18 @@ async def patch_task(
     task_id: uuid.UUID,
     body: TaskUpdateIn,
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db=Depends(get_db),
+    task_service: TaskService = Depends(get_task_service),
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
     await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
 
-    res = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id, Task.deleted == False))  # noqa: E712
-    task = res.scalar_one_or_none()
+    task = await task_service.get_task(task_id, current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail=err(request, "not_found", "Task not found"))
 
     try:
-        updated = await update_task(db, task, body.model_dump(exclude_unset=True), expected_updated_at=body.updated_at)
+        updated = await task_service.update_task(task, body.model_dump(exclude_unset=True), expected_updated_at=body.updated_at)
     except ValueError as exc:
         if str(exc) == "conflict":
             raise HTTPException(
@@ -125,7 +122,6 @@ async def patch_task(
         raise HTTPException(status_code=400, detail=err(request, "validation_error", "Invalid task data"))
 
     await db.commit()
-    await db.refresh(updated)
     log.info(
         "task_updated",
         request_id=request.state.request_id,
@@ -141,17 +137,17 @@ async def delete_task(
     task_id: uuid.UUID,
     body: TaskDeleteIn,
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db=Depends(get_db),
+    task_service: TaskService = Depends(get_task_service),
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
     await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
 
-    res = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id, Task.deleted == False))  # noqa: E712
-    task = res.scalar_one_or_none()
+    task = await task_service.get_task(task_id, current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail=err(request, "not_found", "Task not found"))
 
-    await soft_delete_task(db, task)
+    await task_service.soft_delete_task(task)
     await db.commit()
     log.info(
         "task_deleted",
