@@ -1,8 +1,8 @@
 // lib/core/sync/sync_service.dart
 import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../network/api_client.dart';
-import '../../domain/task.dart';
+import '../../data/datasources/remote/api_client.dart';
+import '../../domain/entities/tasks/task.dart';
 
 class SyncService {
   final ApiClient _apiClient;
