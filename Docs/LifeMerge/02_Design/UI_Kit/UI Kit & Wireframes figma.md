@@ -54,7 +54,7 @@ Bottom navigation consists of five items – Calendar, Tasks, Finance, Inbox and
 
 Spinners & Loading Indicators
 
-Use circular spinners for indeterminate processes and skeleton placeholders for loading lists or cards. Where possible, use progress bars to indicate determinate progress. Indicators adopt neutral or primary colours appropriate for the active theme.
+Use circular spinners for indeterminate processes and placeholders for loading lists or cards. Where possible, use progress bars to indicate determinate progress. Indicators adopt neutral or primary colours appropriate for the active theme.
 
 Colour Tokens
 
@@ -95,7 +95,7 @@ Empty states – when there is no content, show a friendly illustration and a br
 
 Error states – use the error colour token to highlight inputs or modules in error; provide clear messages and actions to recover (e.g. a Retry button for network errors).
 
-Loading states – display skeleton placeholders or spinners while data is loading; subtle animations convey that the content is on its way.
+Loading states – display placeholders or spinners while data is loading; subtle animations convey that the content is on its way.
 
 Offline states – when connectivity is lost, show a banner or toast informing the user. Disable network‑dependent actions and allow offline functionality where possible. Notify the user once the connection returns.
 

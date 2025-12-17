@@ -76,8 +76,8 @@ class TaskService:
         await self._repo.refresh(task)
         return task
 
-    async def soft_delete_task(self, task: Task) -> Task:
+    async def soft_delete_task(db: AsyncSession, task: Task) -> Task:
         values = {"deleted": True, "updated_at": datetime.now(timezone.utc)}
-        await self._repo.soft_delete(task_id=task.id, values=values)
-        await self._repo.refresh(task)
+        await tasks_repo.soft_delete(db, task_id=task.id, values=values)
+        await db.refresh(task)
         return task

@@ -12,6 +12,9 @@ from app.core.logging import configure_logging, log
 from app.db.init_db import init_db
 from app.db.session import engine
 from app.middleware.request_context import RequestContextMiddleware
+from app.db.schema_check import ensure_schema_up_to_date
+from app.middleware.idempotency_snapshot import IdempotencySnapshotMiddleware
+from app.infra.redis_client import get_redis
 
 configure_logging()
 
@@ -68,7 +71,7 @@ def validate_security_config() -> None:
     )
 
 app = FastAPI(
-    title="LifeMerge Backend (Skeleton)",
+    title="LifeMerge Backend",
     version="0.1.0",
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     docs_url=f"{settings.API_V1_PREFIX}/docs",
@@ -101,20 +104,42 @@ else:
     # FastAPI CORSMiddleware будет использовать null origin
 
 app.add_middleware(CORSMiddleware, **cors_kwargs)
-
 # Adds request_id + timezone context, returns request_id in all responses
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(IdempotencySnapshotMiddleware)
+
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
-
 @app.on_event("startup")
 async def on_startup() -> None:
-    # Skeleton convenience: create tables automatically.
-    # In production, use Alembic migrations.
-    await init_db(engine)
+    env = (settings.ENV or "local").lower()
+
+    if env in ("local", "dev"):
+        # dev convenience: create tables automatically
+        await init_db(engine)
+        return
+
+    if env in ("stage", "prod") and not settings.REDIS_URL:
+        raise RuntimeError("REDIS_URL must be set in stage/prod for rate limiting")
+
+    if env in ("stage", "prod"):
+        # strict: alembic must be applied; schema must match head
+        await ensure_schema_up_to_date(engine, alembic_ini_path="alembic.ini")
+        return
+
+    # unknown env -> fail closed (safer for release)
+    raise RuntimeError(f"Unknown ENV={settings.ENV}. Expected local/dev/stage/prod.")
 
 
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    try:
+        r = get_redis()
+        await r.aclose()
+    except Exception:
+        pass
+        
 @app.get("/health")
 async def health():
     return {"status": "ok"}

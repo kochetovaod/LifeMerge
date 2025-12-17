@@ -15,7 +15,7 @@ sys.path.append(str(BASE_DIR))
 
 from app.core.config import settings
 from app.db.base import Base
-from app.models import idempotency, refresh_token, task, user  # noqa: F401
+import app.models  # noqa: F401
 
 config = context.config
 

@@ -82,3 +82,18 @@ AI_SERVICE_AUTH_TOKEN=your_ai_service_token
 ### Verification:
 
 Check application logs for CORS_CONFIGURATION entry on startup to verify your CORS settings.
+
+## Database schema management
+
+### Local/Dev
+В `ENV=local|dev` допускается auto-create таблиц (удобство для разработки).
+
+### Stage/Prod
+В `ENV=stage|prod` auto-create запрещен.
+Перед запуском обязателен шаг:
+
+```bash
+alembic upgrade head
+````
+
+Если схема БД не совпадает с Alembic head — сервис не стартует.

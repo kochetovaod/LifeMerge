@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.api.idempotency import enforce_idempotency
 from app.core.logging import log
 from app.core.response import ok
 from app.db.session import get_db
@@ -20,10 +19,10 @@ async def batch_sync(
     body: BatchSyncRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
-    await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
-
+    # IdempotencySnapshotMiddleware handles:
+    # - key lookup by X-Idempotency-Key (or X-Request-Id fallback if enabled there)
+    # - returning stored response for retries
     results = await process_batch_operations(db, user_id=current_user.id, operations=body.operations)
     await db.commit()
 

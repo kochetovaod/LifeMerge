@@ -44,4 +44,6 @@ async def get_current_user(
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail=err(request, "unauthorized", "User not found"))
+
+    request.state.user_id = str(user.id)
     return user

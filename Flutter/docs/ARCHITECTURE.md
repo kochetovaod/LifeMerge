@@ -1,4 +1,4 @@
-# Flutter Architecture Skeleton
+# Flutter Architecture
 
 - `lib/core` contains shared infrastructure (DI, routing, theme).
 - `lib/features/<feature>/{presentation,application,domain,data}` is the default feature layout.

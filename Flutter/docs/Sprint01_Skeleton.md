@@ -1,6 +1,6 @@
-# LifeMerge Flutter Skeleton
+# LifeMerge Flutter 
 
-This PR adds the initial Flutter codebase skeleton for Sprint 01 (foundation + A1).
+This PR adds the initial Flutter codebase for Sprint 01 (foundation + A1).
 
 ## Included
 - Clean-ish module layout: `core/` and `features/<feature>/{presentation,application,domain,data}`

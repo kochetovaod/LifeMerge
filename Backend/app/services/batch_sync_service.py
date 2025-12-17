@@ -49,6 +49,12 @@ async def _process_task_operation(db: AsyncSession, *, user_id: uuid.UUID, op: B
     if op.action == "upsert":
         return await _apply_task_upsert(db, user_id=user_id, task=task, op=op, updated_at=normalized_updated_at)
 
+    log_sync_error(
+        user_id=str(user_id),
+        entity=op.entity,
+        action=op.action,
+        reason="unsupported_action",
+    )
     return BatchSyncResult(
         entity=op.entity,
         action=op.action,
@@ -56,6 +62,7 @@ async def _process_task_operation(db: AsyncSession, *, user_id: uuid.UUID, op: B
         status="error",
         reason="Unsupported action",
     )
+
 
 
 async def _apply_task_upsert(

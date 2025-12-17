@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import ClassVar
 
-from pydantic import FieldValidationInfo, field_validator
+from pydantic import FieldValidationInfo, field_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # env: dev|stage|prod
     APP_ENV: str = "dev"
     API_V1_PREFIX: str = "/v1"
+    ENV: str = "local"
 
     # DB
     DATABASE_URL: str = "postgresql+asyncpg://lifemerge:lifemerge@db:5432/lifemerge"
@@ -60,6 +61,14 @@ class Settings(BaseSettings):
     FREE_MAX_FINANCE_ACCOUNTS: int = 1
     AI_ALLOWED_PLANS: list[str] = ["pro", "trial"]
     ANALYTICS_ALLOWED_PLANS: list[str] = ["pro"]
+
+    # REDIS
+    REDIS_URL: str | None = None
+
+    AUTH_RL_WINDOW_SECONDS: int = 60
+    AUTH_RL_SIGNUP_LIMIT: int = 10
+    AUTH_RL_LOGIN_LIMIT: int = 20
+    AUTH_RL_FORGOT_LIMIT: int = 10
 
     # Значения по умолчанию, которые считаются небезопасными
     INSECURE_DEFAULT_VALUES: ClassVar[set[str]] = {

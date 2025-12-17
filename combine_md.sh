@@ -1,161 +1,191 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -u -o pipefail
 
-output_file="project_dump.txt"
-debug_log="debug_skipped.log"
+OUTPUT_FILE="${1:-project_context.md}"
 
-# Ограничения (лучше держать умеренно, иначе не влезет в чат)
-max_bytes=$((1200 * 1024))        # 1.2MB на файл
-max_total=$((20 * 1024 * 1024))   # 20MB всего (можно менять)
+INCLUDE_UNTRACKED=true
+MAX_FILE_BYTES=$((300 * 1024 * 1024))          # 300 MB
+MAX_TOTAL_BYTES=$((10 * 1024 * 1024 * 1024))   # 10 GB
+SKIP_MINIFIED=true
+SKIP_LOCKS=true
+SKIP_EXT_REGEX='\.(png|jpg|jpeg|gif|webp|ico|pdf|zip|tar|gz|7z|rar|exe|dll|so|dylib|bin|woff2?|ttf|eot|mp4|mov|avi|mkv|mp3|wav|svg)$'
 
-# Сам скрипт (как он запущен)
-script_path="$0"
-script_base="$(basename "$script_path")"
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Ошибка: текущая директория не является git-репозиторием" >&2
+  exit 1
+fi
 
-# Что включаем (маски)
-include_globs=(
-  "*.md" "*.txt" "*.dart" "*.yaml" "*.yml" "*.log"
-  "*.json" "*.toml" "*.ini" "*.py" "*.sh"
-  "*.gradle" "*.properties" "pubspec.lock"
-  "pubspec.yaml" "Dockerfile" "dockerfile"
-  "Makefile" "makefile" ".gitignore" ".Gitignore"
-  "*.sql" "*.mako" "*.cfg" "*.conf" "*.config"
-)
+lang_for() {
+  case "$1" in
+    *.sh) echo "bash" ;;
+    *.py) echo "python" ;;
+    *.js) echo "javascript" ;;
+    *.ts) echo "typescript" ;;
+    *.tsx) echo "tsx" ;;
+    *.jsx) echo "jsx" ;;
+    *.json) echo "json" ;;
+    *.yml|*.yaml) echo "yaml" ;;
+    *.md) echo "markdown" ;;
+    *.html) echo "html" ;;
+    *.css) echo "css" ;;
+    *.go) echo "go" ;;
+    *.rs) echo "rust" ;;
+    *.java) echo "java" ;;
+    *.kt) echo "kotlin" ;;
+    *.c|*.h) echo "c" ;;
+    *.cpp|*.hpp) echo "cpp" ;;
+    *) echo "" ;;
+  esac
+}
 
-# Что исключаем (директории)
-exclude_dirs=(
-  ".git" ".dart_tool" "build" ".idea"
-  ".vscode" "node_modules" "dist" "target"
-  ".gradle" ".next" ".cache" "Docs" "Flutter"
-)
+# Возвращает 0 если бинарный; 1 если текст; 2 если ошибка чтения
+is_binary() {
+  LC_ALL=C grep -qU $'\x00' "$1" 2>/dev/null
+}
 
-# Собираем выражение prune для директорий
-exclude_find=()
-for dir in "${exclude_dirs[@]}"; do
-  exclude_find+=( -name "$dir" -prune -o )
-done
-
-# Собираем выражение include по маскам
-include_find=()
-for g in "${include_globs[@]}"; do
-  include_find+=( -name "$g" -o )
-done
-unset 'include_find[${#include_find[@]}-1]' 2>/dev/null || true  # убираем последний -o
-
-# Заголовок + структура
+# Заголовок
 {
-  echo "=== PROJECT DUMP ==="
-  echo "Generated: $(date -Iseconds)"
-  echo "Root: $(pwd)"
+  echo "# Project context"
   echo
+  echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+  echo
+  echo "## Files"
+  echo
+} > "$OUTPUT_FILE"
 
-  echo "=== TREE (FILES ONLY) ==="
-  if command -v tree >/dev/null 2>&1; then
-    tree -a -I '.git|node_modules|build|dist|target|.dart_tool|.idea|.vscode|.gradle|.next|.cache' --filesfirst 2>/dev/null || true
-  else
-    find . -type f \( "${exclude_find[@]}" -false \) -o -print | sort 2>/dev/null || true
+total_bytes=0
+added=0
+skipped=0
+skipped_unreadable=0
+skipped_binary=0
+skipped_large=0
+skipped_filtered=0
+
+# Генератор списка файлов (NUL-delimited) + нормальные UTF-8 пути
+gen_list() {
+  git -c core.quotepath=false ls-files -z
+  if [ "$INCLUDE_UNTRACKED" = true ]; then
+    git -c core.quotepath=false ls-files --others --exclude-standard -z
+  fi
+}
+
+gen_list | while IFS= read -r -d '' file; do
+  [ -z "$file" ] && continue
+
+  # фильтры
+  if [[ "$file" =~ $SKIP_EXT_REGEX ]]; then
+    skipped=$((skipped+1)); skipped_filtered=$((skipped_filtered+1))
+    continue
+  fi
+  if [ "$SKIP_MINIFIED" = true ] && [[ "$file" =~ \.min\. ]]; then
+    skipped=$((skipped+1)); skipped_filtered=$((skipped_filtered+1))
+    continue
+  fi
+  if [ "$SKIP_LOCKS" = true ]; then
+    case "$file" in
+      package-lock.json|yarn.lock|pnpm-lock.yaml|poetry.lock|Pipfile.lock|composer.lock|Gemfile.lock)
+        skipped=$((skipped+1)); skipped_filtered=$((skipped_filtered+1))
+        continue
+        ;;
+    esac
   fi
 
-  echo
-  echo "=== FILE CONTENTS ==="
-} > "$output_file"
-
-echo "=== DEBUG LOG ===" > "$debug_log"
-echo "Started: $(date -Iseconds)" >> "$debug_log"
-
-total=0
-processed_files=0
-skipped_files=0
-
-# Список файлов (отсортирован, устойчивый порядок)
-find . \
-  \( "${exclude_find[@]}" -false \) -o \
-  -type f \
-  \( -path "./$output_file" -o -path "./$debug_log" -o -name "$script_base" \) -prune -o \
-  \( "${include_find[@]}" \) -print0 \
-| sort -z \
-| while IFS= read -r -d '' file; do
-    # Текстовый ли файл (несколько проверок)
-    is_text=false
-    if file --mime-type -b "$file" 2>/dev/null | grep -q -E "^(text/|application/json|application/xml)"; then
-      is_text=true
-    elif LC_ALL=C grep -Iq . "$file" 2>/dev/null; then
-      is_text=true
-    elif [[ ! -s "$file" ]]; then
-      is_text=true
-    fi
-
-    if [[ "$is_text" == "false" ]]; then
-      echo "[Non-text] $file" >> "$debug_log"
-      skipped_files=$((skipped_files + 1))
-      continue
-    fi
-
-    size=$(wc -c < "$file" 2>/dev/null | tr -d ' ' || echo "0")
-
-    if (( size > max_bytes )); then
-      echo "[Too large: ${size} bytes] $file" >> "$debug_log"
-      {
-        echo "========================================"
-        echo "FILE: $file"
-        echo "NOTE: skipped (too large: ${size} bytes > ${max_bytes})"
-        echo "========================================"
-        echo
-      } >> "$output_file"
-      skipped_files=$((skipped_files + 1))
-      continue
-    fi
-
-    if (( total + size > max_total )); then
-      echo "[Max total reached: ${total} + ${size} > ${max_total}] $file" >> "$debug_log"
-      {
-        echo "========================================"
-        echo "NOTE: reached max_total=${max_total} bytes, stopping."
-        echo "========================================"
-        echo "Total processed: ${total} bytes in ${processed_files} files"
-        echo "Total skipped: ${skipped_files} files"
-      } >> "$output_file"
-      break
-    fi
-
+  # только обычные читаемые файлы
+  if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     {
-      echo "========================================"
-      echo "FILE: $file"
-      echo "========================================"
+      echo "### \`$file\`"
       echo
-      if [[ -r "$file" ]]; then
-        # Нормализация CRLF
-        sed 's/\r$//' "$file" 2>/dev/null || echo "[Error reading file]"
-      else
-        echo "[File not readable]"
-      fi
+      echo "_SKIPPED: unreadable or not a regular file_"
       echo
-      echo
-    } >> "$output_file"
+    } >> "$OUTPUT_FILE"
+    skipped=$((skipped+1)); skipped_unreadable=$((skipped_unreadable+1))
+    continue
+  fi
 
-    total=$((total + size))
-    processed_files=$((processed_files + 1))
-
-    if (( processed_files % 50 == 0 )); then
-      echo "Processed ${processed_files} files, total ${total} bytes" >&2
+  # бинарность (и ошибки чтения)
+  if is_binary "$file"; then
+    skipped=$((skipped+1)); skipped_binary=$((skipped_binary+1))
+    continue
+  else
+    rc=$?
+    if [ $rc -eq 2 ]; then
+      {
+        echo "### \`$file\`"
+        echo
+        echo "_SKIPPED: error while scanning file (binary check)_"
+        echo
+      } >> "$OUTPUT_FILE"
+      skipped=$((skipped+1)); skipped_unreadable=$((skipped_unreadable+1))
+      continue
     fi
-  done
+  fi
 
+  # размер/строки (если вдруг wc упадёт — не валим весь скрипт)
+  size="$(wc -c < "$file" 2>/dev/null | tr -d ' ' || echo 0)"
+  lines="$(wc -l < "$file" 2>/dev/null | tr -d ' ' || echo 0)"
+
+  if (( total_bytes >= MAX_TOTAL_BYTES )); then
+    {
+      echo "### \`$file\`"
+      echo
+      echo "_SKIPPED: total size limit reached (${MAX_TOTAL_BYTES} bytes)_"
+      echo
+    } >> "$OUTPUT_FILE"
+    skipped=$((skipped+1)); skipped_large=$((skipped_large+1))
+    continue
+  fi
+
+  if (( size > MAX_FILE_BYTES )); then
+    {
+      echo "### \`$file\`"
+      echo
+      echo "_SKIPPED: file too large (${size} bytes > ${MAX_FILE_BYTES} bytes), lines: ${lines}_"
+      echo
+    } >> "$OUTPUT_FILE"
+    skipped=$((skipped+1)); skipped_large=$((skipped_large+1))
+    continue
+  fi
+
+  lang="$(lang_for "$file")"
+
+  {
+    echo "### \`$file\`"
+    echo
+    echo "- size: ${size} bytes"
+    echo "- lines: ${lines}"
+    echo
+    if [ -n "$lang" ]; then
+      echo "\`\`\`$lang"
+    else
+      echo "\`\`\`"
+    fi
+
+    # Если cat упадёт — просто отметим, но продолжим
+    if ! cat "$file"; then
+      echo
+      echo "[[READ ERROR]]"
+    fi
+
+    echo
+    echo "\`\`\`"
+    echo
+  } >> "$OUTPUT_FILE"
+
+  total_bytes=$((total_bytes + size))
+  added=$((added+1))
+done
+
+# Итоговая статистика (дописываем в конец файла)
 {
-  echo "========================================"
-  echo "SUMMARY:"
-  echo "Total files processed: ${processed_files}"
-  echo "Total files skipped: ${skipped_files}"
-  echo "Total bytes written: ${total}"
-  echo "Output file: ${output_file}"
-  echo "Script excluded: ${script_base}"
-  echo "========================================"
-} >> "$output_file"
+  echo "## Summary"
+  echo
+  echo "- added: ${added}"
+  echo "- skipped: ${skipped}"
+  echo "  - filtered: ${skipped_filtered}"
+  echo "  - binary: ${skipped_binary}"
+  echo "  - too large / total limit: ${skipped_large}"
+  echo "  - unreadable/errors: ${skipped_unreadable}"
+  echo
+} >> "$OUTPUT_FILE"
 
-echo >> "$debug_log"
-echo "Total processed: ${processed_files} files" >> "$debug_log"
-echo "Total skipped: ${skipped_files} files" >> "$debug_log"
-echo "Debug log saved to: $debug_log" >> "$debug_log"
-
-echo "Done. Processed ${processed_files} files, skipped ${skipped_files} files."
-echo "Check $debug_log for details on skipped files."
+echo "OK: wrote $OUTPUT_FILE"

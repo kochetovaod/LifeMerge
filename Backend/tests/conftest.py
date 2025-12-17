@@ -1,95 +1,138 @@
 from __future__ import annotations
 
-import asyncio
 import os
-import sys
-import inspect
-from pathlib import Path
-from typing import AsyncIterator
+import uuid
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from httpx import ASGITransport, AsyncClient
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(PROJECT_ROOT))
+# IMPORTANT:
+# Set env BEFORE importing app (settings are read at import time)
+os.environ.setdefault("ENV", "local")
 
-TEST_DB_PATH = Path(__file__).parent / "data" / "test.db"
-TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB_PATH}")
+# test DB / Redis (docker-compose.test.yml)
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://lifemerge:lifemerge@localhost:55432/lifemerge_test")
+os.environ.setdefault("REDIS_URL", "redis://localhost:56379/0")
 
-from app.db.base import Base  # noqa: E402
-from app.db.session import get_db  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models.user import User  # noqa: E402
+# Make rate limits tiny for tests
+os.environ.setdefault("AUTH_RL_WINDOW_SECONDS", "60")
+os.environ.setdefault("AUTH_RL_SIGNUP_LIMIT", "2")
+os.environ.setdefault("AUTH_RL_LOGIN_LIMIT", "3")
+os.environ.setdefault("AUTH_RL_FORGOT_LIMIT", "2")
 
-engine: AsyncEngine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# alembic (stage/prod check is disabled in local)
+# still used by some code paths (keep default)
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
 
 @pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.run_until_complete(engine.dispose())
-    loop.close()
+def any_tz() -> str:
+    return "UTC"
 
 
-async def _prepare_database() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(User.__table__.drop, checkfirst=True)
-        await conn.run_sync(User.__table__.create, checkfirst=True)
+def _headers(*, tz: str, rid: str | None = None, idem: str | None = None) -> dict[str, str]:
+    h = {"X-Timezone": tz}
+    if rid is not None:
+        h["X-Request-Id"] = rid
+    if idem is not None:
+        h["X-Idempotency-Key"] = idem
+    return h
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_database(event_loop: asyncio.AbstractEventLoop) -> AsyncIterator[None]:
-    event_loop.run_until_complete(_prepare_database())
-    yield
-    if TEST_DB_PATH.exists():
-        TEST_DB_PATH.unlink()
+@pytest.fixture(scope="session")
+def make_headers(any_tz):
+    def _mk(rid: str | None = None, idem: str | None = None, tz: str | None = None) -> dict[str, str]:
+        return _headers(tz=tz or any_tz, rid=rid, idem=idem)
+    return _mk
 
 
-@pytest.fixture(scope="session", autouse=True)
-def override_get_db(event_loop: asyncio.AbstractEventLoop) -> AsyncIterator[None]:
-    async def _get_test_db() -> AsyncIterator[AsyncSession]:
-        async with AsyncSessionLocal() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _get_test_db
-    yield
-    app.dependency_overrides.pop(get_db, None)
+@pytest.fixture(scope="session")
+def app():
+    from app.main import app as fastapi_app
+    return fastapi_app
 
 
 @pytest.fixture()
-def db_session(event_loop: asyncio.AbstractEventLoop, setup_database: None) -> AsyncIterator[AsyncSession]:
-    session = AsyncSessionLocal()
-    yield session
-    event_loop.run_until_complete(session.rollback())
-    event_loop.run_until_complete(session.close())
+async def client(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture(scope="session")
+def user_email() -> str:
+    return f"u_{uuid.uuid4().hex[:10]}@test.local"
+
+
+@pytest.fixture(scope="session")
+def user_password() -> str:
+    return "StrongPassw0rd!"
+
+
+@pytest.fixture(scope="session")
+def device_id() -> str:
+    return "ios-device-1"
 
 
 @pytest.fixture()
-def async_client(event_loop: asyncio.AbstractEventLoop, setup_database: None) -> AsyncIterator[AsyncClient]:
-    client = event_loop.run_until_complete(AsyncClient(app=app, base_url="http://test").__aenter__())
-    yield client
-    event_loop.run_until_complete(client.aclose())
+async def redis_flush():
+    try:
+        from app.infra.redis_client import get_redis
+        r = get_redis()
+        await r.flushdb()
+    except Exception:
+        # tests that don't hit rate-limit should still run
+        pass
+    yield
+    try:
+        from app.infra.redis_client import get_redis
+        r = get_redis()
+        await r.flushdb()
+    except Exception:
+        pass
 
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_pyfunc_call(pyfuncitem):
-    testfunction = pyfuncitem.obj
-    if inspect.iscoroutinefunction(testfunction):
-        loop = pyfuncitem.funcargs.get("event_loop") or asyncio.new_event_loop()
-        try:
-            allowed_args = {
-                name: value
-                for name, value in pyfuncitem.funcargs.items()
-                if name in inspect.signature(testfunction).parameters
-            }
-            loop.run_until_complete(testfunction(**allowed_args))
-        finally:
-            if not pyfuncitem.funcargs.get("event_loop"):
-                loop.close()
-        return True
-    return None
+@pytest.fixture(scope="session")
+def auth_paths():
+    return {
+        "signup": "/v1/auth/signup",
+        "login": "/v1/auth/login",
+        "refresh": "/v1/auth/refresh",
+        "forgot": "/v1/auth/forgot",
+    }
+
+
+@pytest.fixture(scope="session")
+def tasks_path():
+    return "/v1/tasks"
+
+
+async def signup(
+    client: AsyncClient,
+    *,
+    path: str,
+    email: str,
+    password: str,
+    headers: dict[str, str],
+):
+    body = {"email": email, "password": password, "full_name": "Test", "timezone": headers["X-Timezone"]}
+    return await client.post(path, json=body, headers=headers)
+
+
+async def login(
+    client: AsyncClient,
+    *,
+    path: str,
+    email: str,
+    password: str,
+    device_id: str,
+    headers: dict[str, str],
+):
+    body = {"email": email, "password": password, "device_id": device_id}
+    return await client.post(path, json=body, headers=headers)
+
+
+async def auth_header(access_token: str, headers: dict[str, str]) -> dict[str, str]:
+    h = dict(headers)
+    h["Authorization"] = f"Bearer {access_token}"
+    return h

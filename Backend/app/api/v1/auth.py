@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import err, ok
 from app.core.logging import log
 from app.db.session import get_db
-from app.middleware.rate_limit import forgot_rate_limit, signup_rate_limit
+from app.middleware.rate_limit import forgot_rate_limit, login_rate_limit, signup_rate_limit
 from app.schemas.auth import AuthOut, ForgotIn, LoginIn, LogoutIn, RefreshIn, ResetIn, SignupIn
 from app.schemas.user import UserOut
 from app.services.auth_service import (
@@ -70,7 +70,7 @@ async def signup(
     )
 
 
-@router.post("/login", response_model=AuthOut)
+@router.post("/login", response_model=AuthOut, dependencies=[login_rate_limit])
 async def login(request: Request, body: LoginIn, db: AsyncSession = Depends(get_db)):
     user = await authenticate_user(db, body.email, body.password)
     if not user:

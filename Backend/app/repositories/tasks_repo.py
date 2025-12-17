@@ -10,7 +10,9 @@ from app.models.task import Task
 
 
 async def get_by_id(db: AsyncSession, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task | None:
-    res = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id, Task.deleted == False))  # noqa: E712
+    res = await db.execute(
+        select(Task).where(Task.id == task_id, Task.user_id == user_id, Task.deleted == False)  # noqa: E712
+    )
     return res.scalar_one_or_none()
 
 
@@ -26,6 +28,7 @@ async def list(
     limit: int,
 ) -> tuple[list[Task], str | None]:
     q = select(Task).where(Task.user_id == user_id, Task.deleted == False)  # noqa: E712
+
     if status:
         q = q.where(Task.status == status)
     if goal_id:
@@ -57,15 +60,10 @@ async def list(
     return rows, next_cursor
 
 
-async def create(db: AsyncSession, task: Task) -> Task:
-    db.add(task)
-    await db.flush()
-    return task
-
-
 async def patch(db: AsyncSession, *, task_id: uuid.UUID, values: dict) -> None:
     await db.execute(update(Task).where(Task.id == task_id).values(**values))
 
 
 async def soft_delete(db: AsyncSession, *, task_id: uuid.UUID, values: dict) -> None:
+    # values must include: deleted=True, updated_at=...
     await db.execute(update(Task).where(Task.id == task_id).values(**values))

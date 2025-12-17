@@ -53,7 +53,7 @@ class TaskUpdateIn(BaseModel):
     estimated_minutes: int | None = None
     energy_level: int | None = None
     status: str | None = None
-    updated_at: datetime | None = None
+    updated_at: datetime
     request_id: str = Field(min_length=1, max_length=128)
 
     @field_validator("priority", "estimated_minutes", "energy_level")

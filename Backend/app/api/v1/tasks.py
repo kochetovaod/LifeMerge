@@ -14,6 +14,11 @@ from app.db.session import get_db
 from app.schemas.tasks import ALLOWED_STATUSES, TaskCreateIn, TaskDeleteIn, TaskListOut, TaskOut, TaskUpdateIn
 from app.services.events import publish_event
 from app.infrastructure.di import get_task_service
+from datetime import timezone
+from app.models.notification import NotificationTrigger
+from app.schemas.reminders import ReminderCreateIn, ReminderListOut, ReminderOut
+from app.repositories import notification_triggers_repo
+from app.services.events import publish_event
 
 router = APIRouter(prefix="/tasks")
 
@@ -141,18 +146,77 @@ async def delete_task(
     task_service: TaskService = Depends(get_task_service),
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
 ):
-    await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
-
-    task = await task_service.get_task(task_id, current_user.id)
+    res = await db.execute(
+        select(Task).where(Task.id == task_id, Task.user_id == current_user.id, Task.deleted == False)  # noqa: E712
+    )
+    task = res.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail=err(request, "not_found", "Task not found"))
 
-    await task_service.soft_delete_task(task)
+    await soft_delete_task(db, task)
     await db.commit()
-    log.info(
-        "task_deleted",
+    return ok(request, {"status": "ok"})
+
+@router.get("/{task_id}/reminders", response_model=ReminderListOut)
+async def get_task_reminders(
+    request: Request,
+    task_id: uuid.UUID,
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # verify task
+    res = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id, Task.deleted == False))  # noqa: E712
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Task not found"))
+
+    items, next_cursor = await notification_triggers_repo.list_for_entity(
+        db,
+        user_id=current_user.id,
+        entity="task",
+        entity_id=task_id,
+        cursor=cursor,
+        limit=limit,
+    )
+    return ok(request, {"items": [ReminderOut.model_validate(x) for x in items], "next_cursor": next_cursor})
+
+
+@router.post("/{task_id}/reminders", response_model=ReminderOut)
+async def create_task_reminder(
+    request: Request,
+    task_id: uuid.UUID,
+    body: ReminderCreateIn,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+):
+    await enforce_idempotency(request, current_user, db, request_id=body.request_id, idempotency_key=x_idempotency_key)
+
+    res = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id, Task.deleted == False))  # noqa: E712
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=err(request, "not_found", "Task not found"))
+
+    now = datetime.now(timezone.utc)
+    trig = NotificationTrigger(
+        user_id=current_user.id,
+        entity="task",
+        entity_id=task_id,
+        trigger_at=body.remind_at,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        deleted=False,
+    )
+    await notification_triggers_repo.create(db, trig)
+    await db.commit()
+    await db.refresh(trig)
+
+    publish_event(
+        name="Task_Reminder_Created",
         request_id=request.state.request_id,
         user_id=str(current_user.id),
-        task_id=str(task.id),
+        payload={"task_id": str(task_id), "trigger_id": str(trig.id)},
     )
-    return ok(request, {"status": "ok"})
+
+    return ok(request, ReminderOut.model_validate(trig).model_dump())

@@ -1,8 +1,8 @@
 # 📱 Mobile — Sprint 01 (Foundation + A1)
 
-## EPIC M0 — Core App Skeleton & Infrastructure
+## EPIC M0 — Core App & Infrastructure
 
-### M0.1 Finalize App Skeleton
+### M0.1 Finalize App
 
 **Type:** Story
 **Priority:** P0
@@ -83,7 +83,7 @@
 * AppBar.
 * BottomNavigation.
 * ModalSheet / Dialog.
-* Loader / Skeleton.
+* Loader.
 
 **DoD:**
 
