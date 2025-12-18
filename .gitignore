@@ -1,5 +1,5 @@
 project_dump*.txt
-combine_md*.sh
+dump.sh
 debug_skipped*.log
 
 # ================================
